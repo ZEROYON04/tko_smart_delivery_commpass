@@ -36,7 +36,7 @@
     "lint-staged": "^17.3.0",
     "prettier": "^3.9.6",
     "prettier-plugin-sql": "^0.20.0",
-    "supabase": "^2.111.0",
+    "supabase": "~2.104.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
