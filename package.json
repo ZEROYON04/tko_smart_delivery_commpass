@@ -39,5 +39,14 @@
     "supabase": "^2.111.0",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "pnpm exec eslint --fix",
+      "pnpm exec prettier --write"
+    ],
+    "*.{json,md,sql}": [
+      "pnpm exec prettier --write"
+    ]
   }
 }
