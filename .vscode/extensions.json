@@ -3,6 +3,6 @@
     "dbaeumer.vscode-eslint",
     "esbenp.prettier-vscode",
     "bradlc.vscode-tailwindcss",
-    "supabase.vscode-supabase-extension",
+    "supabase.vscode-supabase-extension"
   ]
 }
