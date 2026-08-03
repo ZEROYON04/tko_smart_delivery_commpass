@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "preinstall": "npx only-allow pnpm"
   },
   "packageManager": "pnpm@11.9.0",
@@ -17,9 +18,11 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
+    "maplibre-gl": "^6.1.0",
     "next": "16.2.12",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/compat": "^2.1.0",
@@ -38,7 +41,8 @@
     "prettier-plugin-sql": "^0.20.0",
     "supabase": "~2.104.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [

@@ -1,0 +1,642 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { LoadingState } from "@/components/common/loading-state";
+import { StatusBadge } from "@/components/common/status-badge";
+import { DROPOFF_LOCATION_LABELS } from "@/lib/constants/delivery";
+import { formatDeliveryDate } from "@/lib/format/delivery";
+import { useDeliveryRealtime } from "@/hooks/use-delivery-realtime";
+import type {
+  DeliveryMethod,
+  DeliveryStatus,
+  DropoffLocation,
+  RunResponse,
+} from "@/types/delivery";
+import { CurrentDeliveryCard } from "./current-delivery-card";
+import { DeliveryList } from "./delivery-list";
+import { DeliveryRouteMap } from "./delivery-route-map";
+import { RouteOverview } from "./route-overview";
+
+type Notice = { title: string; body: string };
+
+export function DriverDashboard({ runId }: { runId: string }) {
+  const [data, setData] = useState<RunResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [routeUpdating, setRouteUpdating] = useState(false);
+  const [locationMessage, setLocationMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [deliveryDateInput, setDeliveryDateInput] = useState<string | null>(
+    null,
+  );
+  const dataRef = useRef<RunResponse | null>(null);
+  const initialRouteRefreshAttempted = useRef(false);
+
+  const loadData = useCallback(
+    async (fromRealtime = false) => {
+      try {
+        const response = await fetch(`/api/runs/${runId}`, {
+          cache: "no-store",
+        });
+        const body: unknown = await response.json();
+
+        if (!response.ok) {
+          const message =
+            typeof body === "object" && body && "message" in body
+              ? String(body.message)
+              : "配送情報を取得できませんでした。";
+          throw new Error(message);
+        }
+
+        const nextData = body as RunResponse;
+        const previousData = dataRef.current;
+
+        if (fromRealtime && previousData) {
+          const changedStop = nextData.stops.find((nextStop) => {
+            const previousStop = previousData.stops.find(
+              (candidate) => candidate.stopId === nextStop.stopId,
+            );
+            return (
+              previousStop &&
+              (previousStop.delivery.deliveryMethod !==
+                nextStop.delivery.deliveryMethod ||
+                previousStop.delivery.dropoffLocation !==
+                  nextStop.delivery.dropoffLocation)
+            );
+          });
+
+          if (changedStop) {
+            const method =
+              changedStop.delivery.deliveryMethod === "dropoff"
+                ? changedStop.delivery.dropoffLocation
+                  ? `置き配（${DROPOFF_LOCATION_LABELS[changedStop.delivery.dropoffLocation]}）`
+                  : "置き配（場所未指定）"
+                : "対面受取";
+            setNotice({
+              title: `${changedStop.stopOrder}番目の荷物が${method}へ変更されました。`,
+              body: "後続の到着予定時刻を更新しました。配送順は変更されていません。",
+            });
+          } else if (
+            nextData.run.routeRevision !== previousData.run.routeRevision
+          ) {
+            setNotice({
+              title: "配送ルートを更新しました。",
+              body: "道路所要時間・在宅予定・配送時間帯を基に順番とETAを再計算しました。",
+            });
+          }
+        }
+
+        dataRef.current = nextData;
+        setData(nextData);
+        setError(null);
+      } catch (loadError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "読み込みに失敗しました。",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [runId],
+  );
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const handleRealtimeChange = useCallback(() => {
+    void loadData(true);
+  }, [loadData]);
+
+  useDeliveryRealtime(runId, handleRealtimeChange);
+
+  const optimizeCurrentRoute = useCallback(
+    async (reason: string, showNotice = true) => {
+      setRouteUpdating(true);
+      try {
+        const response = await fetch(`/api/runs/${runId}/optimize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        });
+        const body: unknown = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            typeof body === "object" && body && "message" in body
+              ? String(body.message)
+              : "配送ルートを更新できませんでした。",
+          );
+        }
+        const result = body as {
+          provider: string;
+          usedFallback: boolean;
+        };
+        if (showNotice) {
+          setNotice({
+            title: "配送ルートを再計算しました。",
+            body: result.usedFallback
+              ? "実道路サービスへ接続できなかったため、モック距離で安全に再計算しました。"
+              : `${result.provider.toUpperCase()}の道路情報と時間帯制約を反映しました。`,
+          });
+        }
+        await loadData();
+      } catch (routeError) {
+        setError(
+          routeError instanceof Error
+            ? routeError.message
+            : "配送ルートを更新できませんでした。",
+        );
+      } finally {
+        setRouteUpdating(false);
+      }
+    },
+    [loadData, runId],
+  );
+
+  useEffect(() => {
+    if (!data || initialRouteRefreshAttempted.current) return;
+    if (data.stops.every((stop) => stop.provider === "osrm")) return;
+    initialRouteRefreshAttempted.current = true;
+    const refreshTimer = window.setTimeout(() => {
+      void optimizeCurrentRoute("initial-real-road-route", false);
+    }, 0);
+    return () => window.clearTimeout(refreshTimer);
+  }, [data, optimizeCurrentRoute]);
+
+  async function updateStatus(status: Extract<DeliveryStatus, "delivered">) {
+    const currentStop = data?.stops.find(
+      (stop) => stop.stopOrder === data.run.currentStopOrder,
+    );
+    if (!currentStop) return;
+
+    setUpdating(true);
+    try {
+      const response = await fetch(
+        `/api/deliveries/${currentStop.delivery.id}/status`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status,
+            version: currentStop.delivery.version,
+          }),
+        },
+      );
+      const body: unknown = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "配達状態を更新できませんでした。",
+        );
+      }
+
+      setNotice({
+        title:
+          status === "delivered"
+            ? "配達を完了しました。"
+            : "ご不在として記録しました。",
+        body: "次の配送先へ進みます。配送順は維持されています。",
+      });
+      await loadData();
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "更新に失敗しました。",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function updateDeliveryMethod(input: {
+    method: DeliveryMethod;
+    dropoffLocation: DropoffLocation | null;
+  }) {
+    const currentStop = data?.stops.find(
+      (stop) => stop.stopOrder === data.run.currentStopOrder,
+    );
+    if (!currentStop) return;
+
+    setUpdating(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/deliveries/${currentStop.delivery.id}/method`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...input,
+            version: currentStop.delivery.version,
+          }),
+        },
+      );
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "受取方法を更新できませんでした。",
+        );
+      }
+
+      const detail =
+        input.method === "dropoff"
+          ? input.dropoffLocation
+            ? `置き配場所を「${DROPOFF_LOCATION_LABELS[input.dropoffLocation]}」に設定しました。`
+            : "置き配に変更しました。場所は未指定です。"
+          : "対面受取に変更しました。";
+      setNotice({
+        title: detail,
+        body: "滞在時間と後続の到着予定時刻を更新しました。配送順は維持されています。",
+      });
+      await loadData();
+    } catch (methodError) {
+      setError(
+        methodError instanceof Error
+          ? methodError.message
+          : "受取方法を更新できませんでした。",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function updateDeliveryDate() {
+    const nextDate = deliveryDateInput ?? data?.run.deliveryDate;
+    if (!data || !nextDate || nextDate === data.run.deliveryDate) return;
+
+    setRouteUpdating(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/runs/${runId}/date`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryDate: nextDate }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "配送日を変更できませんでした。",
+        );
+      }
+
+      setDeliveryDateInput(null);
+      setNotice({
+        title: `配送日を${formatDeliveryDate(nextDate)}へ変更しました。`,
+        body: "会社別の時間枠、残りの配送順、道路経路、ETAを新しい日付で再計算しました。",
+      });
+      await loadData();
+    } catch (dateError) {
+      setError(
+        dateError instanceof Error
+          ? dateError.message
+          : "配送日を変更できませんでした。",
+      );
+    } finally {
+      setRouteUpdating(false);
+    }
+  }
+
+  async function scheduleReattempt(input: {
+    returnInMinutes: number;
+    preferredWindowCode: string | null;
+  }) {
+    const currentStop = data?.stops.find(
+      (stop) => stop.stopOrder === data.run.currentStopOrder,
+    );
+    if (!currentStop) return;
+
+    setUpdating(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/deliveries/${currentStop.delivery.id}/reattempt`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...input,
+            version: currentStop.delivery.version,
+          }),
+        },
+      );
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "再配達を設定できませんでした。",
+        );
+      }
+      const result = body as {
+        window: { label: string; movedToNextDay: boolean };
+        optimization: { provider: string; usedFallback: boolean };
+      };
+      setNotice({
+        title: `不在を記録し、${result.window.label}の再配達へ組み込みました。`,
+        body: result.window.movedToNextDay
+          ? "本日の枠に収まらないため、翌日の最初の枠へ再配置しました。"
+          : "在宅予定と道路所要時間を基に、残りの配送順とETAを再計算しました。",
+      });
+      await loadData();
+    } catch (reattemptError) {
+      setError(
+        reattemptError instanceof Error
+          ? reattemptError.message
+          : "再配達を設定できませんでした。",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function startRun() {
+    setUpdating(true);
+    try {
+      const response = await fetch(`/api/runs/${runId}/start`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("配送を開始できませんでした。");
+      await loadData();
+    } catch (startError) {
+      setError(
+        startError instanceof Error
+          ? startError.message
+          : "開始に失敗しました。",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  function updateLocation() {
+    if (!navigator.geolocation) {
+      setLocationMessage("この端末では位置情報を利用できません。");
+      return;
+    }
+
+    setLocationMessage("現在地を取得しています…");
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        try {
+          const response = await fetch(`/api/runs/${runId}/location`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+            }),
+          });
+          if (!response.ok) throw new Error();
+          setLocationMessage("現在地を更新しました。");
+          await loadData();
+        } catch {
+          setLocationMessage("現在地を更新できませんでした。");
+        }
+      },
+      () => setLocationMessage("位置情報の利用が許可されませんでした。"),
+      { enableHighAccuracy: true, timeout: 10_000 },
+    );
+  }
+
+  if (loading) return <LoadingState label="配送コースを読み込んでいます" />;
+
+  if (error && !data) {
+    return (
+      <div className="mx-auto max-w-xl rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-sm">
+        <p className="font-bold text-slate-900">配送情報を表示できません</p>
+        <p className="mt-2 text-sm text-slate-500">{error}</p>
+        <button
+          className="mt-5 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white"
+          onClick={() => void loadData()}
+          type="button"
+        >
+          再読み込み
+        </button>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const completedCount = data.stops.filter(
+    (stop) => stop.delivery.status === "delivered",
+  ).length;
+  const currentStop = data.stops.find(
+    (stop) =>
+      stop.stopOrder === data.run.currentStopOrder &&
+      ["pending", "out_for_delivery"].includes(stop.delivery.status),
+  );
+
+  return (
+    <div className="min-h-screen bg-[#f4f7fb]">
+      <header className="border-b border-slate-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+          <Link className="flex items-center gap-3" href="/">
+            <span className="flex size-10 items-center justify-center rounded-2xl bg-blue-600 font-black text-white shadow-sm">
+              S
+            </span>
+            <div>
+              <p className="font-bold leading-tight text-slate-900">
+                スマート配送コンパス
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Driver console · Hiroshima
+              </p>
+            </div>
+          </Link>
+          <button
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+            onClick={updateLocation}
+            type="button"
+          >
+            ◎ 現在地を更新
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge kind="run" value={data.run.status} />
+              <form
+                className="flex flex-wrap items-center gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void updateDeliveryDate();
+                }}
+              >
+                <label className="sr-only" htmlFor="delivery-date">
+                  配送日
+                </label>
+                <input
+                  className="min-h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm"
+                  disabled={routeUpdating || updating}
+                  id="delivery-date"
+                  onInput={(event) =>
+                    setDeliveryDateInput(event.currentTarget.value)
+                  }
+                  type="date"
+                  value={deliveryDateInput ?? data.run.deliveryDate}
+                />
+                <button
+                  className="min-h-9 rounded-xl bg-slate-900 px-3 text-xs font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={
+                    routeUpdating ||
+                    updating ||
+                    !deliveryDateInput ||
+                    deliveryDateInput === data.run.deliveryDate
+                  }
+                  type="submit"
+                >
+                  {routeUpdating ? "再計算中…" : "配送日を変更"}
+                </button>
+              </form>
+            </div>
+            <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
+              おはようございます、{data.run.driverName}
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              焦らず、安全に。変更は自動で反映されます。
+            </p>
+          </div>
+          <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Progress
+              </p>
+              <p className="mt-0.5 text-sm font-bold text-slate-800">
+                {completedCount} / {data.stops.length} 件完了
+              </p>
+            </div>
+            <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-blue-600 transition-all"
+                style={{
+                  width: `${(completedCount / data.stops.length) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {notice && (
+          <div
+            className="mb-5 flex items-start justify-between gap-4 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-4 text-teal-950 shadow-sm"
+            role="status"
+          >
+            <div className="flex gap-3">
+              <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-teal-600 text-sm font-bold text-white">
+                ✓
+              </span>
+              <div>
+                <p className="text-sm font-bold">{notice.title}</p>
+                <p className="mt-0.5 text-xs leading-5 text-teal-700">
+                  {notice.body}
+                </p>
+              </div>
+            </div>
+            <button
+              className="text-lg leading-none text-teal-600"
+              onClick={() => setNotice(null)}
+              type="button"
+              aria-label="通知を閉じる"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {error}
+          </div>
+        )}
+        {locationMessage && (
+          <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+            {locationMessage}
+          </div>
+        )}
+
+        {data.run.status === "planned" ? (
+          <button
+            className="mb-6 w-full rounded-2xl bg-blue-600 px-5 py-4 font-bold text-white shadow-lg shadow-blue-900/10 disabled:opacity-60"
+            disabled={updating}
+            onClick={() => void startRun()}
+            type="button"
+          >
+            本日の配送を開始する
+          </button>
+        ) : null}
+
+        <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+          <CurrentDeliveryCard
+            key={currentStop?.delivery.id ?? "completed"}
+            stop={currentStop}
+            updating={updating}
+            onMethodChange={(input) => void updateDeliveryMethod(input)}
+            onStatusChange={(status) => void updateStatus(status)}
+            onReattempt={(input) => void scheduleReattempt(input)}
+          />
+          <RouteOverview
+            provider={data.run.routeProvider}
+            revision={data.run.routeRevision}
+            stops={data.stops}
+          />
+        </div>
+
+        <section className="mt-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="flex size-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                  ◫
+                </span>
+                <h2 className="font-bold text-slate-900">
+                  東広島・実道路ルート
+                </h2>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                青線が現在の配送経路、橙色の番号が再配達地点です
+              </p>
+            </div>
+            <button
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-slate-700 disabled:opacity-60"
+              disabled={routeUpdating || updating}
+              onClick={() =>
+                void optimizeCurrentRoute("driver-manual-optimization")
+              }
+              type="button"
+            >
+              {routeUpdating ? "道路経路を計算中…" : "道路経路を再計算"}
+            </button>
+          </div>
+          <DeliveryRouteMap
+            depot={{
+              name: data.run.depotName,
+              latitude: data.run.depotLatitude,
+              longitude: data.run.depotLongitude,
+            }}
+            latestLocation={data.latestLocation}
+            stops={data.stops}
+          />
+        </section>
+
+        <div className="mt-8">
+          <DeliveryList stops={data.stops} />
+        </div>
+      </main>
+    </div>
+  );
+}
