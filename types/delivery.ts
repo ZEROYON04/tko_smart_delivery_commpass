@@ -1,5 +1,13 @@
 export type DeliveryMethod = "handoff" | "dropoff";
 
+export type DropoffLocation =
+  | "front_door"
+  | "delivery_box"
+  | "gas_meter_box"
+  | "bicycle_basket"
+  | "building_reception"
+  | "other";
+
 export type Carrier = "yamato" | "sagawa" | "japan_post";
 
 export type DeliveryStatus =
@@ -16,6 +24,7 @@ export type Delivery = {
   latitude: number;
   longitude: number;
   deliveryMethod: DeliveryMethod;
+  dropoffLocation: DropoffLocation | null;
   carrier: Carrier;
   requestedWindowCode: string | null;
   windowStart: string | null;

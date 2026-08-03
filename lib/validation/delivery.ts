@@ -1,8 +1,31 @@
 import { z } from "zod";
 
+export const dropoffLocationSchema = z.enum([
+  "front_door",
+  "delivery_box",
+  "gas_meter_box",
+  "bicycle_basket",
+  "building_reception",
+  "other",
+]);
+
 export const deliveryMethodRequestSchema = z.object({
   method: z.enum(["handoff", "dropoff"]),
+  dropoffLocation: dropoffLocationSchema.nullable().optional(),
   version: z.number().int().positive(),
+});
+
+export const deliveryDateRequestSchema = z.object({
+  deliveryDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine((value) => {
+      const parsed = new Date(`${value}T00:00:00Z`);
+      return (
+        !Number.isNaN(parsed.getTime()) &&
+        parsed.toISOString().startsWith(value)
+      );
+    }),
 });
 
 export const deliveryStatusRequestSchema = z.object({
@@ -43,6 +66,7 @@ export const optimizeRunRequestSchema = z.object({
 export const methodResultSchema = z.object({
   deliveryId: z.string().uuid(),
   deliveryMethod: z.enum(["handoff", "dropoff"]),
+  dropoffLocation: dropoffLocationSchema.nullable(),
   serviceSeconds: z.number().int().nonnegative(),
   version: z.number().int().positive(),
 });

@@ -18,7 +18,7 @@ export function RouteOverview({
             <span className="flex size-8 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
               ↗
             </span>
-            <h2 className="font-bold text-slate-900">本日の配送コース</h2>
+            <h2 className="font-bold text-slate-900">配送コース</h2>
           </div>
           <p className="mt-1 text-xs text-slate-500">
             {provider === "osrm"

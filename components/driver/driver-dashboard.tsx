@@ -4,9 +4,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoadingState } from "@/components/common/loading-state";
 import { StatusBadge } from "@/components/common/status-badge";
+import { DROPOFF_LOCATION_LABELS } from "@/lib/constants/delivery";
 import { formatDeliveryDate } from "@/lib/format/delivery";
 import { useDeliveryRealtime } from "@/hooks/use-delivery-realtime";
-import type { DeliveryStatus, RunResponse } from "@/types/delivery";
+import type {
+  DeliveryMethod,
+  DeliveryStatus,
+  DropoffLocation,
+  RunResponse,
+} from "@/types/delivery";
 import { CurrentDeliveryCard } from "./current-delivery-card";
 import { DeliveryList } from "./delivery-list";
 import { DeliveryRouteMap } from "./delivery-route-map";
@@ -22,6 +28,9 @@ export function DriverDashboard({ runId }: { runId: string }) {
   const [routeUpdating, setRouteUpdating] = useState(false);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [deliveryDateInput, setDeliveryDateInput] = useState<string | null>(
+    null,
+  );
   const dataRef = useRef<RunResponse | null>(null);
   const initialRouteRefreshAttempted = useRef(false);
 
@@ -51,15 +60,19 @@ export function DriverDashboard({ runId }: { runId: string }) {
             );
             return (
               previousStop &&
-              previousStop.delivery.deliveryMethod !==
-                nextStop.delivery.deliveryMethod
+              (previousStop.delivery.deliveryMethod !==
+                nextStop.delivery.deliveryMethod ||
+                previousStop.delivery.dropoffLocation !==
+                  nextStop.delivery.dropoffLocation)
             );
           });
 
           if (changedStop) {
             const method =
               changedStop.delivery.deliveryMethod === "dropoff"
-                ? "置き配"
+                ? changedStop.delivery.dropoffLocation
+                  ? `置き配（${DROPOFF_LOCATION_LABELS[changedStop.delivery.dropoffLocation]}）`
+                  : "置き配（場所未指定）"
                 : "対面受取";
             setNotice({
               title: `${changedStop.stopOrder}番目の荷物が${method}へ変更されました。`,
@@ -199,6 +212,98 @@ export function DriverDashboard({ runId }: { runId: string }) {
       );
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function updateDeliveryMethod(input: {
+    method: DeliveryMethod;
+    dropoffLocation: DropoffLocation | null;
+  }) {
+    const currentStop = data?.stops.find(
+      (stop) => stop.stopOrder === data.run.currentStopOrder,
+    );
+    if (!currentStop) return;
+
+    setUpdating(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/deliveries/${currentStop.delivery.id}/method`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...input,
+            version: currentStop.delivery.version,
+          }),
+        },
+      );
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "受取方法を更新できませんでした。",
+        );
+      }
+
+      const detail =
+        input.method === "dropoff"
+          ? input.dropoffLocation
+            ? `置き配場所を「${DROPOFF_LOCATION_LABELS[input.dropoffLocation]}」に設定しました。`
+            : "置き配に変更しました。場所は未指定です。"
+          : "対面受取に変更しました。";
+      setNotice({
+        title: detail,
+        body: "滞在時間と後続の到着予定時刻を更新しました。配送順は維持されています。",
+      });
+      await loadData();
+    } catch (methodError) {
+      setError(
+        methodError instanceof Error
+          ? methodError.message
+          : "受取方法を更新できませんでした。",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function updateDeliveryDate() {
+    const nextDate = deliveryDateInput ?? data?.run.deliveryDate;
+    if (!data || !nextDate || nextDate === data.run.deliveryDate) return;
+
+    setRouteUpdating(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/runs/${runId}/date`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryDate: nextDate }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "配送日を変更できませんでした。",
+        );
+      }
+
+      setDeliveryDateInput(null);
+      setNotice({
+        title: `配送日を${formatDeliveryDate(nextDate)}へ変更しました。`,
+        body: "会社別の時間枠、残りの配送順、道路経路、ETAを新しい日付で再計算しました。",
+      });
+      await loadData();
+    } catch (dateError) {
+      setError(
+        dateError instanceof Error
+          ? dateError.message
+          : "配送日を変更できませんでした。",
+      );
+    } finally {
+      setRouteUpdating(false);
     }
   }
 
@@ -365,9 +470,39 @@ export function DriverDashboard({ runId }: { runId: string }) {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge kind="run" value={data.run.status} />
-              <span className="text-xs text-slate-400">
-                {formatDeliveryDate(data.run.deliveryDate)}
-              </span>
+              <form
+                className="flex flex-wrap items-center gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void updateDeliveryDate();
+                }}
+              >
+                <label className="sr-only" htmlFor="delivery-date">
+                  配送日
+                </label>
+                <input
+                  className="min-h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm"
+                  disabled={routeUpdating || updating}
+                  id="delivery-date"
+                  onInput={(event) =>
+                    setDeliveryDateInput(event.currentTarget.value)
+                  }
+                  type="date"
+                  value={deliveryDateInput ?? data.run.deliveryDate}
+                />
+                <button
+                  className="min-h-9 rounded-xl bg-slate-900 px-3 text-xs font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={
+                    routeUpdating ||
+                    updating ||
+                    !deliveryDateInput ||
+                    deliveryDateInput === data.run.deliveryDate
+                  }
+                  type="submit"
+                >
+                  {routeUpdating ? "再計算中…" : "配送日を変更"}
+                </button>
+              </form>
             </div>
             <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
               おはようございます、{data.run.driverName}
@@ -447,8 +582,10 @@ export function DriverDashboard({ runId }: { runId: string }) {
 
         <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
           <CurrentDeliveryCard
+            key={currentStop?.delivery.id ?? "completed"}
             stop={currentStop}
             updating={updating}
+            onMethodChange={(input) => void updateDeliveryMethod(input)}
             onStatusChange={(status) => void updateStatus(status)}
             onReattempt={(input) => void scheduleReattempt(input)}
           />

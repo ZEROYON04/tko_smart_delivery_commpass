@@ -31,11 +31,15 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   try {
     const supabase = createSupabaseAdminClient();
-    const { data, error } = await supabase.rpc("change_delivery_method", {
-      p_delivery_id: deliveryId,
-      p_method: parsed.data.method,
-      p_expected_version: parsed.data.version,
-    });
+    const { data, error } = await supabase.rpc(
+      "change_delivery_method_details",
+      {
+        p_delivery_id: deliveryId,
+        p_method: parsed.data.method,
+        p_dropoff_location: parsed.data.dropoffLocation ?? null,
+        p_expected_version: parsed.data.version,
+      },
+    );
 
     if (error) {
       if (error.message.includes("VERSION_CONFLICT")) {

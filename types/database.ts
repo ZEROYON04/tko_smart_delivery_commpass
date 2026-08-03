@@ -28,6 +28,22 @@ export type Database = {
         };
         Returns: Json;
       };
+      change_delivery_method_details: {
+        Args: {
+          p_delivery_id: string;
+          p_method: string;
+          p_dropoff_location: string | null;
+          p_expected_version: number;
+        };
+        Returns: Json;
+      };
+      change_run_delivery_date: {
+        Args: {
+          p_run_id: string;
+          p_delivery_date: string;
+        };
+        Returns: Json;
+      };
       change_delivery_status: {
         Args: {
           p_delivery_id: string;

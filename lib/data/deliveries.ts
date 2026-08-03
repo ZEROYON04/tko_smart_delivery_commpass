@@ -3,6 +3,7 @@ import "server-only";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type {
   Delivery,
+  DropoffLocation,
   DeliveryMethod,
   DeliveryRun,
   DeliveryStatus,
@@ -39,6 +40,7 @@ type DeliveryRow = {
   latitude: number;
   longitude: number;
   delivery_method: DeliveryMethod;
+  dropoff_location: DropoffLocation | null;
   carrier: Delivery["carrier"];
   requested_window_code: string | null;
   window_start: string | null;
@@ -105,6 +107,7 @@ function mapDelivery(row: DeliveryRow): Delivery {
     latitude: row.latitude,
     longitude: row.longitude,
     deliveryMethod: row.delivery_method,
+    dropoffLocation: row.dropoff_location,
     carrier: row.carrier,
     requestedWindowCode: row.requested_window_code,
     windowStart: row.window_start,

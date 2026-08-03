@@ -11,6 +11,15 @@ export const DELIVERY_METHOD_LABELS = {
   dropoff: "置き配",
 } as const;
 
+export const DROPOFF_LOCATION_LABELS = {
+  front_door: "玄関前",
+  delivery_box: "宅配ボックス",
+  gas_meter_box: "ガスメーターボックス",
+  bicycle_basket: "自転車のかご",
+  building_reception: "建物の受付・管理人",
+  other: "その他の指定場所",
+} as const;
+
 export const DELIVERY_STATUS_LABELS = {
   pending: "配送待ち",
   out_for_delivery: "配送中",

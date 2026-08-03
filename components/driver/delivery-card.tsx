@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { StatusBadge } from "@/components/common/status-badge";
+import { DROPOFF_LOCATION_LABELS } from "@/lib/constants/delivery";
 import {
   formatDistance,
   formatEta,
@@ -53,6 +54,14 @@ export function DeliveryCard({ stop }: { stop: RouteStop }) {
                   stop.delivery.requestedWindowCode,
                 )}
               </p>
+              {isDropoff && (
+                <p className="mt-1 text-xs font-bold text-teal-700">
+                  置き配場所：
+                  {stop.delivery.dropoffLocation
+                    ? DROPOFF_LOCATION_LABELS[stop.delivery.dropoffLocation]
+                    : "未指定"}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-1.5">
               <StatusBadge kind="method" value={stop.delivery.deliveryMethod} />

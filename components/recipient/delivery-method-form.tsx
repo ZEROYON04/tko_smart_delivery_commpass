@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { StatusBadge } from "@/components/common/status-badge";
+import { DROPOFF_LOCATION_LABELS } from "@/lib/constants/delivery";
 import {
   formatEta,
   formatRelativeArrival,
@@ -264,7 +265,9 @@ export function DeliveryMethodForm({
               <p className="mt-1 text-lg font-bold text-slate-900">
                 {data.delivery.deliveryMethod === "handoff"
                   ? "対面で受け取る"
-                  : "指定場所へ置き配"}
+                  : data.delivery.dropoffLocation
+                    ? `${DROPOFF_LOCATION_LABELS[data.delivery.dropoffLocation]}へ置き配`
+                    : "置き配（場所はドライバーが確認）"}
               </p>
             </div>
             <StatusBadge kind="method" value={data.delivery.deliveryMethod} />
