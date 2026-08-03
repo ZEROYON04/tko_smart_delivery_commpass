@@ -1,6 +1,10 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
 import { StatusBadge } from "@/components/common/status-badge";
 import { DROPOFF_LOCATION_LABELS } from "@/lib/constants/delivery";
+import { DELIVERY_TIME_SLOT_LABELS } from "@/lib/constants/time-slots";
 import {
   formatDistance,
   formatEta,
@@ -11,6 +15,31 @@ import type { RouteStop } from "@/types/delivery";
 
 export function DeliveryCard({ stop }: { stop: RouteStop }) {
   const isDropoff = stop.delivery.deliveryMethod === "dropoff";
+  const [notifying, setNotifying] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState<string | null>(
+    null,
+  );
+
+  async function notifyRecipient() {
+    setNotifying(true);
+    setNotificationMessage(null);
+
+    try {
+      const response = await fetch(
+        `/api/deliveries/${stop.delivery.id}/notify`,
+        { method: "POST" },
+      );
+      const body = (await response.json()) as { message?: string };
+      setNotificationMessage(
+        body.message ??
+          (response.ok ? "通知を送信しました。" : "通知に失敗しました。"),
+      );
+    } catch {
+      setNotificationMessage("通知に失敗しました。");
+    } finally {
+      setNotifying(false);
+    }
+  }
 
   return (
     <article
@@ -64,6 +93,15 @@ export function DeliveryCard({ stop }: { stop: RouteStop }) {
               )}
             </div>
             <div className="flex flex-wrap gap-1.5">
+              <span
+                className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                  stop.delivery.lineLinked
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {stop.delivery.lineLinked ? "LINE連携済み" : "LINE未連携"}
+              </span>
               <StatusBadge kind="method" value={stop.delivery.deliveryMethod} />
               <StatusBadge kind="delivery" value={stop.delivery.status} />
               {stop.delivery.isReattempt && (
@@ -97,7 +135,46 @@ export function DeliveryCard({ stop }: { stop: RouteStop }) {
             </div>
           </div>
 
-          <div className="mt-3 flex justify-end">
+          <p className="mt-3 text-xs text-slate-500">
+            指定時間帯：
+            <span className="font-semibold text-slate-700">
+              {DELIVERY_TIME_SLOT_LABELS[stop.delivery.deliveryTimeSlot]}
+            </span>
+          </p>
+
+          {stop.delivery.rescheduleRequestedAt && (
+            <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+              受取人から「本日は受取不可」の連絡あり・日時変更待ち
+            </p>
+          )}
+
+          {stop.delivery.unavailableUntil && (
+            <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+              受取人から短時間不在の連絡あり（
+              {new Intl.DateTimeFormat("ja-JP", {
+                hour: "2-digit",
+                minute: "2-digit",
+                timeZone: "Asia/Tokyo",
+              }).format(new Date(stop.delivery.unavailableUntil))}
+              まで）
+            </p>
+          )}
+
+          {notificationMessage && (
+            <p className="mt-3 text-xs text-slate-600" role="status">
+              {notificationMessage}
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
+            <button
+              className="rounded-lg bg-[#06c755] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#05b64d] disabled:cursor-not-allowed disabled:bg-slate-300"
+              disabled={!stop.delivery.lineLinked || notifying}
+              onClick={() => void notifyRecipient()}
+              type="button"
+            >
+              {notifying ? "送信中…" : "LINEで到着通知"}
+            </button>
             <Link
               className="text-xs font-semibold text-blue-600 transition hover:text-blue-800"
               href={`/recipient/${stop.delivery.id}`}

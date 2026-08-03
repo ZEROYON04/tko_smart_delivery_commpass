@@ -36,6 +36,15 @@ export function useDeliveryRealtime(runId: string, onChange: () => void) {
         {
           event: "*",
           schema: "public",
+          table: "recipient_accounts",
+        },
+        scheduleRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
           table: "route_stops",
           filter: `run_id=eq.${runId}`,
         },

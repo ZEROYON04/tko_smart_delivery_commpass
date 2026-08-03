@@ -88,7 +88,8 @@ export default function Home() {
                 </Link>
               </div>
               <p className="mt-4 text-xs text-slate-400">
-                LINE・AWSには未接続です。ローカルのデモデータと公開経路サービスで動作します。
+                配送情報・経路はダミーデータです。LINE Messaging
+                APIと公開経路サービスの連携を確認できます。
               </p>
             </div>
 

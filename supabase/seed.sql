@@ -4,7 +4,42 @@ public.driver_locations,
 public.route_legs,
 public.route_stops,
 public.deliveries,
+public.recipient_accounts,
 public.delivery_runs restart identity cascade;
+
+insert into
+  public.recipient_accounts (id, customer_code, display_name)
+values
+  (
+    '00000000-0000-4000-8000-000000000401',
+    'USER-A',
+    '美術館受付'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000402',
+    'USER-B',
+    '西条駅受付'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000403',
+    'USER-C',
+    '道の駅受付'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000404',
+    'USER-D',
+    '八本松駅受付'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000405',
+    'USER-E',
+    '大学内郵便局受付'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000406',
+    'USER-F',
+    '黒瀬支所受付'
+  );
 
 insert into
   public.delivery_runs (
@@ -37,6 +72,7 @@ insert into
   public.deliveries (
     id,
     run_id,
+    recipient_id,
     tracking_number,
     recipient_name,
     address,
@@ -48,12 +84,14 @@ insert into
     carrier,
     requested_window_code,
     window_start,
-    window_end
+    window_end,
+    delivery_time_slot
   )
 values
   (
     '00000000-0000-4000-8000-000000000101',
     '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000401',
     'YAMATO-0001',
     '美術館受付',
     '広島県東広島市西条栄町9番1号',
@@ -65,11 +103,13 @@ values
     'yamato',
     'morning',
     (current_date::timestamp + time '08:00') at time zone 'Asia/Tokyo',
-    (current_date::timestamp + time '12:00') at time zone 'Asia/Tokyo'
+    (current_date::timestamp + time '12:00') at time zone 'Asia/Tokyo',
+    'morning'
   ),
   (
     '00000000-0000-4000-8000-000000000102',
     '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000402',
     'SAGAWA-0002',
     '西条駅受付',
     '広島県東広島市西条本町12番3号',
@@ -81,11 +121,13 @@ values
     'sagawa',
     'morning',
     (current_date::timestamp + time '08:00') at time zone 'Asia/Tokyo',
-    (current_date::timestamp + time '12:00') at time zone 'Asia/Tokyo'
+    (current_date::timestamp + time '12:00') at time zone 'Asia/Tokyo',
+    'morning'
   ),
   (
     '00000000-0000-4000-8000-000000000103',
     '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000403',
     'YAMATO-0003',
     '道の駅受付',
     '広島県東広島市西条町寺家10020番地43',
@@ -97,11 +139,13 @@ values
     'yamato',
     '14-16',
     (current_date::timestamp + time '14:00') at time zone 'Asia/Tokyo',
-    (current_date::timestamp + time '16:00') at time zone 'Asia/Tokyo'
+    (current_date::timestamp + time '16:00') at time zone 'Asia/Tokyo',
+    '14_16'
   ),
   (
     '00000000-0000-4000-8000-000000000104',
     '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000404',
     'POST-0004',
     '八本松駅受付',
     '広島県東広島市八本松町飯田1539番地3',
@@ -113,11 +157,13 @@ values
     'japan_post',
     '14-16',
     (current_date::timestamp + time '14:00') at time zone 'Asia/Tokyo',
-    (current_date::timestamp + time '16:00') at time zone 'Asia/Tokyo'
+    (current_date::timestamp + time '16:00') at time zone 'Asia/Tokyo',
+    '14_16'
   ),
   (
     '00000000-0000-4000-8000-000000000105',
     '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000405',
     'SAGAWA-0005',
     '大学内郵便局受付',
     '広島県東広島市鏡山1丁目1番3号',
@@ -129,11 +175,13 @@ values
     'sagawa',
     '16-18',
     (current_date::timestamp + time '16:00') at time zone 'Asia/Tokyo',
-    (current_date::timestamp + time '18:00') at time zone 'Asia/Tokyo'
+    (current_date::timestamp + time '18:00') at time zone 'Asia/Tokyo',
+    '16_18'
   ),
   (
     '00000000-0000-4000-8000-000000000106',
     '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000406',
     'POST-0006',
     '黒瀬支所受付',
     '広島県東広島市黒瀬町丸山1333番地',
@@ -145,7 +193,8 @@ values
     'japan_post',
     '18-20',
     (current_date::timestamp + time '18:00') at time zone 'Asia/Tokyo',
-    (current_date::timestamp + time '20:00') at time zone 'Asia/Tokyo'
+    (current_date::timestamp + time '20:00') at time zone 'Asia/Tokyo',
+    '18_20'
   );
 
 insert into
