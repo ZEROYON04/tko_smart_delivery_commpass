@@ -21,6 +21,25 @@ export const locationRequestSchema = z.object({
   longitude: z.number().min(-180).max(180),
 });
 
+export const reattemptRequestSchema = z.object({
+  returnInMinutes: z
+    .number()
+    .int()
+    .min(5)
+    .max(24 * 60),
+  preferredWindowCode: z.string().min(1).max(20).nullable().optional(),
+  version: z.number().int().positive(),
+});
+
+export const deliveryWindowRequestSchema = z.object({
+  windowCode: z.string().min(1).max(20),
+  version: z.number().int().positive(),
+});
+
+export const optimizeRunRequestSchema = z.object({
+  reason: z.string().min(1).max(120).optional(),
+});
+
 export const methodResultSchema = z.object({
   deliveryId: z.string().uuid(),
   deliveryMethod: z.enum(["handoff", "dropoff"]),

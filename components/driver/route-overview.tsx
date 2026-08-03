@@ -1,7 +1,15 @@
 import { formatEta } from "@/lib/format/delivery";
 import type { RouteStop } from "@/types/delivery";
 
-export function RouteOverview({ stops }: { stops: RouteStop[] }) {
+export function RouteOverview({
+  stops,
+  provider,
+  revision,
+}: {
+  stops: RouteStop[];
+  provider: string;
+  revision: number;
+}) {
   return (
     <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
@@ -13,12 +21,14 @@ export function RouteOverview({ stops }: { stops: RouteStop[] }) {
             <h2 className="font-bold text-slate-900">本日の配送コース</h2>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            経路・所要時間はモック計算です
+            {provider === "osrm"
+              ? "OpenStreetMap道路網の走行距離・所要時間を反映"
+              : "実道路取得失敗時はモック経路へ自動フォールバック"}
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
           <span className="size-1.5 rounded-full bg-emerald-500" />
-          順序ロック中
+          {provider.toUpperCase()} · 改訂 {revision}
         </span>
       </div>
       <div className="overflow-x-auto px-5 py-6 sm:px-6">

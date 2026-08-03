@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "スマート配送コンパス in 広島",
   description:
-    "受取方法の変更をリアルタイムに共有し、配送順を保ったままETAを更新する配送支援モック",
+    "東広島市の実経路、会社別の配送時間帯、不在時の再配達ルート最適化を確認できる配送支援モック",
 };
 
 export default function RootLayout({

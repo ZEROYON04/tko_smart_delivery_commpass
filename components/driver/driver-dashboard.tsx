@@ -9,6 +9,7 @@ import { useDeliveryRealtime } from "@/hooks/use-delivery-realtime";
 import type { DeliveryStatus, RunResponse } from "@/types/delivery";
 import { CurrentDeliveryCard } from "./current-delivery-card";
 import { DeliveryList } from "./delivery-list";
+import { DeliveryRouteMap } from "./delivery-route-map";
 import { RouteOverview } from "./route-overview";
 
 type Notice = { title: string; body: string };
@@ -18,9 +19,11 @@ export function DriverDashboard({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [routeUpdating, setRouteUpdating] = useState(false);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const dataRef = useRef<RunResponse | null>(null);
+  const initialRouteRefreshAttempted = useRef(false);
 
   const loadData = useCallback(
     async (fromRealtime = false) => {
@@ -62,6 +65,13 @@ export function DriverDashboard({ runId }: { runId: string }) {
               title: `${changedStop.stopOrder}番目の荷物が${method}へ変更されました。`,
               body: "後続の到着予定時刻を更新しました。配送順は変更されていません。",
             });
+          } else if (
+            nextData.run.routeRevision !== previousData.run.routeRevision
+          ) {
+            setNotice({
+              title: "配送ルートを更新しました。",
+              body: "道路所要時間・在宅予定・配送時間帯を基に順番とETAを再計算しました。",
+            });
           }
         }
 
@@ -91,9 +101,60 @@ export function DriverDashboard({ runId }: { runId: string }) {
 
   useDeliveryRealtime(runId, handleRealtimeChange);
 
-  async function updateStatus(
-    status: Extract<DeliveryStatus, "delivered" | "absent">,
-  ) {
+  const optimizeCurrentRoute = useCallback(
+    async (reason: string, showNotice = true) => {
+      setRouteUpdating(true);
+      try {
+        const response = await fetch(`/api/runs/${runId}/optimize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        });
+        const body: unknown = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            typeof body === "object" && body && "message" in body
+              ? String(body.message)
+              : "配送ルートを更新できませんでした。",
+          );
+        }
+        const result = body as {
+          provider: string;
+          usedFallback: boolean;
+        };
+        if (showNotice) {
+          setNotice({
+            title: "配送ルートを再計算しました。",
+            body: result.usedFallback
+              ? "実道路サービスへ接続できなかったため、モック距離で安全に再計算しました。"
+              : `${result.provider.toUpperCase()}の道路情報と時間帯制約を反映しました。`,
+          });
+        }
+        await loadData();
+      } catch (routeError) {
+        setError(
+          routeError instanceof Error
+            ? routeError.message
+            : "配送ルートを更新できませんでした。",
+        );
+      } finally {
+        setRouteUpdating(false);
+      }
+    },
+    [loadData, runId],
+  );
+
+  useEffect(() => {
+    if (!data || initialRouteRefreshAttempted.current) return;
+    if (data.stops.every((stop) => stop.provider === "osrm")) return;
+    initialRouteRefreshAttempted.current = true;
+    const refreshTimer = window.setTimeout(() => {
+      void optimizeCurrentRoute("initial-real-road-route", false);
+    }, 0);
+    return () => window.clearTimeout(refreshTimer);
+  }, [data, optimizeCurrentRoute]);
+
+  async function updateStatus(status: Extract<DeliveryStatus, "delivered">) {
     const currentStop = data?.stops.find(
       (stop) => stop.stopOrder === data.run.currentStopOrder,
     );
@@ -135,6 +196,59 @@ export function DriverDashboard({ runId }: { runId: string }) {
         updateError instanceof Error
           ? updateError.message
           : "更新に失敗しました。",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function scheduleReattempt(input: {
+    returnInMinutes: number;
+    preferredWindowCode: string | null;
+  }) {
+    const currentStop = data?.stops.find(
+      (stop) => stop.stopOrder === data.run.currentStopOrder,
+    );
+    if (!currentStop) return;
+
+    setUpdating(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/deliveries/${currentStop.delivery.id}/reattempt`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...input,
+            version: currentStop.delivery.version,
+          }),
+        },
+      );
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "再配達を設定できませんでした。",
+        );
+      }
+      const result = body as {
+        window: { label: string; movedToNextDay: boolean };
+        optimization: { provider: string; usedFallback: boolean };
+      };
+      setNotice({
+        title: `不在を記録し、${result.window.label}の再配達へ組み込みました。`,
+        body: result.window.movedToNextDay
+          ? "本日の枠に収まらないため、翌日の最初の枠へ再配置しました。"
+          : "在宅予定と道路所要時間を基に、残りの配送順とETAを再計算しました。",
+      });
+      await loadData();
+    } catch (reattemptError) {
+      setError(
+        reattemptError instanceof Error
+          ? reattemptError.message
+          : "再配達を設定できませんでした。",
       );
     } finally {
       setUpdating(false);
@@ -216,7 +330,7 @@ export function DriverDashboard({ runId }: { runId: string }) {
   const currentStop = data.stops.find(
     (stop) =>
       stop.stopOrder === data.run.currentStopOrder &&
-      !["delivered", "cancelled"].includes(stop.delivery.status),
+      ["pending", "out_for_delivery"].includes(stop.delivery.status),
   );
 
   return (
@@ -336,9 +450,51 @@ export function DriverDashboard({ runId }: { runId: string }) {
             stop={currentStop}
             updating={updating}
             onStatusChange={(status) => void updateStatus(status)}
+            onReattempt={(input) => void scheduleReattempt(input)}
           />
-          <RouteOverview stops={data.stops} />
+          <RouteOverview
+            provider={data.run.routeProvider}
+            revision={data.run.routeRevision}
+            stops={data.stops}
+          />
         </div>
+
+        <section className="mt-5 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="flex size-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                  ◫
+                </span>
+                <h2 className="font-bold text-slate-900">
+                  東広島・実道路ルート
+                </h2>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                青線が現在の配送経路、橙色の番号が再配達地点です
+              </p>
+            </div>
+            <button
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-slate-700 disabled:opacity-60"
+              disabled={routeUpdating || updating}
+              onClick={() =>
+                void optimizeCurrentRoute("driver-manual-optimization")
+              }
+              type="button"
+            >
+              {routeUpdating ? "道路経路を計算中…" : "道路経路を再計算"}
+            </button>
+          </div>
+          <DeliveryRouteMap
+            depot={{
+              name: data.run.depotName,
+              latitude: data.run.depotLatitude,
+              longitude: data.run.depotLongitude,
+            }}
+            latestLocation={data.latestLocation}
+            stops={data.stops}
+          />
+        </section>
 
         <div className="mt-8">
           <DeliveryList stops={data.stops} />

@@ -11,7 +11,9 @@ export function DeliveryList({ stops }: { stops: RouteStop[] }) {
           </p>
           <h2 className="mt-1 text-xl font-bold text-slate-900">配送一覧</h2>
         </div>
-        <p className="text-xs text-slate-500">配送順は自動変更されません</p>
+        <p className="text-xs text-slate-500">
+          不在・時間帯変更時のみ残りの順番を最適化
+        </p>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         {stops.map((stop) => (

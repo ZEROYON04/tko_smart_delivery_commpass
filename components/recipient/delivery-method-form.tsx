@@ -8,6 +8,11 @@ import {
   formatRelativeArrival,
   formatServiceTime,
 } from "@/lib/format/delivery";
+import {
+  CARRIER_LABELS,
+  formatWindowLabel,
+  getCarrierTimeSlots,
+} from "@/lib/scheduling/time-slots";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
   DeliveryMethod,
@@ -25,6 +30,10 @@ export function DeliveryMethodForm({
     initialData,
   );
   const [updating, setUpdating] = useState<DeliveryMethod | null>(null);
+  const [windowUpdating, setWindowUpdating] = useState(false);
+  const [selectedWindow, setSelectedWindow] = useState(
+    initialData.delivery.requestedWindowCode ?? "",
+  );
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -43,7 +52,9 @@ export function DeliveryMethodForm({
         );
       }
 
-      setData(body as RecipientDeliveryResponse);
+      const nextData = body as RecipientDeliveryResponse;
+      setData(nextData);
+      setSelectedWindow(nextData.delivery.requestedWindowCode ?? "");
       setError(null);
     } catch (loadError) {
       setError(
@@ -118,6 +129,45 @@ export function DeliveryMethodForm({
       );
     } finally {
       setUpdating(null);
+    }
+  }
+
+  async function changeWindow() {
+    if (!data || !selectedWindow) return;
+    if (selectedWindow === data.delivery.requestedWindowCode) return;
+
+    setWindowUpdating(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await fetch(`/api/deliveries/${deliveryId}/window`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          windowCode: selectedWindow,
+          version: data.delivery.version,
+        }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "配達時間帯を変更できませんでした。",
+        );
+      }
+      await loadDelivery();
+      setSuccess(
+        "配達時間帯を変更し、ドライバーの配送順と到着予定を再計算しました。",
+      );
+    } catch (windowError) {
+      setError(
+        windowError instanceof Error
+          ? windowError.message
+          : "配達時間帯を変更できませんでした。",
+      );
+    } finally {
+      setWindowUpdating(false);
     }
   }
 
@@ -229,6 +279,57 @@ export function DeliveryMethodForm({
             </p>
           </div>
 
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs text-slate-500">配送会社・時間帯</p>
+                <p className="mt-1 font-bold text-slate-900">
+                  {CARRIER_LABELS[data.delivery.carrier]}
+                </p>
+              </div>
+              {data.delivery.isReattempt && (
+                <span className="rounded-full bg-orange-100 px-3 py-1.5 text-xs font-bold text-orange-700">
+                  再配達ルートに設定済み
+                </span>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              現在：
+              {formatWindowLabel(
+                data.delivery.carrier,
+                data.delivery.requestedWindowCode,
+              )}
+            </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+              <select
+                aria-label="希望する配達時間帯"
+                className="min-h-12 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800"
+                disabled={windowUpdating || isFinished}
+                onChange={(event) => setSelectedWindow(event.target.value)}
+                value={selectedWindow}
+              >
+                {getCarrierTimeSlots(data.delivery.carrier).map((slot) => (
+                  <option key={slot.code} value={slot.code}>
+                    {slot.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="min-h-12 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
+                disabled={
+                  windowUpdating ||
+                  isFinished ||
+                  !selectedWindow ||
+                  selectedWindow === data.delivery.requestedWindowCode
+                }
+                onClick={() => void changeWindow()}
+                type="button"
+              >
+                {windowUpdating ? "再計算中…" : "時間帯を変更"}
+              </button>
+            </div>
+          </div>
+
           {success && (
             <div
               className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-800"
@@ -256,6 +357,7 @@ export function DeliveryMethodForm({
               }`}
               disabled={
                 Boolean(updating) ||
+                windowUpdating ||
                 isFinished ||
                 data.delivery.deliveryMethod === "dropoff"
               }
@@ -276,6 +378,7 @@ export function DeliveryMethodForm({
               }`}
               disabled={
                 Boolean(updating) ||
+                windowUpdating ||
                 isFinished ||
                 data.delivery.deliveryMethod === "handoff"
               }
@@ -291,9 +394,9 @@ export function DeliveryMethodForm({
           </div>
 
           <p className="mt-5 text-center text-xs leading-5 text-slate-400">
-            変更しても配送の順番は変わりません。
+            受取方法だけの変更では配送順は変わりません。
             <br />
-            後続の到着予定時刻だけが自動で更新されます。
+            時間帯を変更した場合は残りの配送順とETAを再計算します。
           </p>
         </section>
 

@@ -1,4 +1,9 @@
-import type { Coordinate, RouteLegResult, RoutingProvider } from "./types";
+import type {
+  Coordinate,
+  RouteLegResult,
+  RouteMatrixResult,
+  RoutingProvider,
+} from "./types";
 
 const EARTH_RADIUS_METERS = 6_371_000;
 const ROAD_DISTANCE_FACTOR = 1.3;
@@ -31,6 +36,8 @@ function calculateHaversineDistance(
 }
 
 export class MockRoutingProvider implements RoutingProvider {
+  readonly name = "mock";
+
   async calculateLeg(
     origin: Coordinate,
     destination: Coordinate,
@@ -47,5 +54,39 @@ export class MockRoutingProvider implements RoutingProvider {
       ),
       geometry: [origin, destination],
     };
+  }
+
+  async calculateRoute(coordinates: Coordinate[]) {
+    const legs: RouteLegResult[] = [];
+    for (let index = 0; index < coordinates.length - 1; index += 1) {
+      legs.push(
+        await this.calculateLeg(coordinates[index], coordinates[index + 1]),
+      );
+    }
+    return legs;
+  }
+
+  async calculateMatrix(coordinates: Coordinate[]): Promise<RouteMatrixResult> {
+    const durations: Array<Array<number | null>> = [];
+    const distances: Array<Array<number | null>> = [];
+
+    for (const origin of coordinates) {
+      const durationRow: Array<number | null> = [];
+      const distanceRow: Array<number | null> = [];
+      for (const destination of coordinates) {
+        if (origin === destination) {
+          durationRow.push(0);
+          distanceRow.push(0);
+          continue;
+        }
+        const leg = await this.calculateLeg(origin, destination);
+        durationRow.push(leg.durationSeconds);
+        distanceRow.push(leg.distanceMeters);
+      }
+      durations.push(durationRow);
+      distances.push(distanceRow);
+    }
+
+    return { durations, distances };
   }
 }

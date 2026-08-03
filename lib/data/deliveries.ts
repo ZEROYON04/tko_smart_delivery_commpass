@@ -20,8 +20,14 @@ type RunRow = {
   current_stop_order: number;
   depot_latitude: number;
   depot_longitude: number;
+  depot_name: string;
+  depot_address: string;
   started_at: string | null;
   completed_at: string | null;
+  route_revision: number;
+  route_provider: string;
+  optimized_at: string | null;
+  optimization_note: string | null;
 };
 
 type DeliveryRow = {
@@ -33,6 +39,14 @@ type DeliveryRow = {
   latitude: number;
   longitude: number;
   delivery_method: DeliveryMethod;
+  carrier: Delivery["carrier"];
+  requested_window_code: string | null;
+  window_start: string | null;
+  window_end: string | null;
+  available_from: string | null;
+  is_reattempt: boolean;
+  reattempt_count: number;
+  last_absent_at: string | null;
   service_seconds: number;
   status: DeliveryStatus;
   version: number;
@@ -52,6 +66,7 @@ type LegRow = {
   distance_meters: number;
   duration_seconds: number;
   provider: string;
+  route_geometry: unknown;
 };
 
 type LocationRow = {
@@ -69,8 +84,14 @@ function mapRun(row: RunRow): DeliveryRun {
     currentStopOrder: row.current_stop_order,
     depotLatitude: row.depot_latitude,
     depotLongitude: row.depot_longitude,
+    depotName: row.depot_name,
+    depotAddress: row.depot_address,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+    routeRevision: row.route_revision,
+    routeProvider: row.route_provider,
+    optimizedAt: row.optimized_at,
+    optimizationNote: row.optimization_note,
   };
 }
 
@@ -84,6 +105,14 @@ function mapDelivery(row: DeliveryRow): Delivery {
     latitude: row.latitude,
     longitude: row.longitude,
     deliveryMethod: row.delivery_method,
+    carrier: row.carrier,
+    requestedWindowCode: row.requested_window_code,
+    windowStart: row.window_start,
+    windowEnd: row.window_end,
+    availableFrom: row.available_from,
+    isReattempt: row.is_reattempt,
+    reattemptCount: row.reattempt_count,
+    lastAbsentAt: row.last_absent_at,
     serviceSeconds: row.service_seconds,
     status: row.status,
     version: row.version,
@@ -105,7 +134,9 @@ export async function getRunResponse(
         .order("stop_order"),
       supabase
         .from("route_legs")
-        .select("leg_order,distance_meters,duration_seconds,provider")
+        .select(
+          "leg_order,distance_meters,duration_seconds,provider,route_geometry",
+        )
         .eq("run_id", runId)
         .order("leg_order"),
       supabase
@@ -158,6 +189,12 @@ export async function getRunResponse(
         distanceMeters: leg.distance_meters,
         durationSeconds: leg.duration_seconds,
         provider: leg.provider,
+        geometry: Array.isArray(leg.route_geometry)
+          ? (leg.route_geometry as Array<{
+              latitude: number;
+              longitude: number;
+            }>)
+          : [],
         delivery,
       },
     ];

@@ -5,6 +5,7 @@ import {
   formatEta,
   formatServiceTime,
 } from "@/lib/format/delivery";
+import { CARRIER_LABELS, formatWindowLabel } from "@/lib/scheduling/time-slots";
 import type { RouteStop } from "@/types/delivery";
 
 export function DeliveryCard({ stop }: { stop: RouteStop }) {
@@ -45,10 +46,22 @@ export function DeliveryCard({ stop }: { stop: RouteStop }) {
               <p className="mt-1 text-sm text-slate-500">
                 {stop.delivery.recipientName}
               </p>
+              <p className="mt-1 text-xs font-medium text-slate-400">
+                {CARRIER_LABELS[stop.delivery.carrier]} ·
+                {formatWindowLabel(
+                  stop.delivery.carrier,
+                  stop.delivery.requestedWindowCode,
+                )}
+              </p>
             </div>
             <div className="flex flex-wrap gap-1.5">
               <StatusBadge kind="method" value={stop.delivery.deliveryMethod} />
               <StatusBadge kind="delivery" value={stop.delivery.status} />
+              {stop.delivery.isReattempt && (
+                <span className="rounded-full bg-orange-100 px-2.5 py-1 text-[11px] font-bold text-orange-700">
+                  再配達 {stop.delivery.reattemptCount}回目
+                </span>
+              )}
             </div>
           </div>
 

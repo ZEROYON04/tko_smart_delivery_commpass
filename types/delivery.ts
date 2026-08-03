@@ -1,5 +1,7 @@
 export type DeliveryMethod = "handoff" | "dropoff";
 
+export type Carrier = "yamato" | "sagawa" | "japan_post";
+
 export type DeliveryStatus =
   "pending" | "out_for_delivery" | "delivered" | "absent" | "cancelled";
 
@@ -14,6 +16,14 @@ export type Delivery = {
   latitude: number;
   longitude: number;
   deliveryMethod: DeliveryMethod;
+  carrier: Carrier;
+  requestedWindowCode: string | null;
+  windowStart: string | null;
+  windowEnd: string | null;
+  availableFrom: string | null;
+  isReattempt: boolean;
+  reattemptCount: number;
+  lastAbsentAt: string | null;
   serviceSeconds: number;
   status: DeliveryStatus;
   version: number;
@@ -27,6 +37,7 @@ export type RouteStop = {
   distanceMeters: number;
   durationSeconds: number;
   provider: string;
+  geometry: Array<{ latitude: number; longitude: number }>;
   delivery: Delivery;
 };
 
@@ -38,8 +49,14 @@ export type DeliveryRun = {
   currentStopOrder: number;
   depotLatitude: number;
   depotLongitude: number;
+  depotName: string;
+  depotAddress: string;
   startedAt: string | null;
   completedAt: string | null;
+  routeRevision: number;
+  routeProvider: string;
+  optimizedAt: string | null;
+  optimizationNote: string | null;
 };
 
 export type DriverLocation = {
@@ -58,4 +75,15 @@ export type RecipientDeliveryResponse = {
   delivery: Delivery;
   stop: Pick<RouteStop, "stopId" | "stopOrder" | "estimatedArrival" | "locked">;
   driverName: string;
+};
+
+export type RouteOptimizationResponse = {
+  runId: string;
+  provider: string;
+  usedFallback: boolean;
+  stopCount: number;
+  totalDistanceMeters: number;
+  totalDurationSeconds: number;
+  reason: string;
+  orderedDeliveryIds: string[];
 };
