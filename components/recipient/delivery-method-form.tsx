@@ -23,9 +23,11 @@ import type {
 export function DeliveryMethodForm({
   deliveryId,
   initialData,
+  accessQuery,
 }: {
   deliveryId: string;
   initialData: RecipientDeliveryResponse;
+  accessQuery: string;
 }) {
   const [data, setData] = useState<RecipientDeliveryResponse | null>(
     initialData,
@@ -40,9 +42,13 @@ export function DeliveryMethodForm({
 
   const loadDelivery = useCallback(async () => {
     try {
-      const response = await fetch(`/api/deliveries/${deliveryId}`, {
-        cache: "no-store",
-      });
+      const querySuffix = accessQuery ? `?${accessQuery}` : "";
+      const response = await fetch(
+        `/api/deliveries/${deliveryId}${querySuffix}`,
+        {
+          cache: "no-store",
+        },
+      );
       const body: unknown = await response.json();
 
       if (!response.ok) {
@@ -64,7 +70,7 @@ export function DeliveryMethodForm({
           : "読み込みに失敗しました。",
       );
     }
-  }, [deliveryId]);
+  }, [accessQuery, deliveryId]);
 
   useEffect(() => {
     let supabase;
@@ -101,11 +107,15 @@ export function DeliveryMethodForm({
     setSuccess(null);
 
     try {
-      const response = await fetch(`/api/deliveries/${deliveryId}/method`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method, version: data.delivery.version }),
-      });
+      const querySuffix = accessQuery ? `?${accessQuery}` : "";
+      const response = await fetch(
+        `/api/deliveries/${deliveryId}/method${querySuffix}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ method, version: data.delivery.version }),
+        },
+      );
       const body: unknown = await response.json();
 
       if (!response.ok) {

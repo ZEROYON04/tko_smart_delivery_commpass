@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { DeliveryTimeSlot } from "@/lib/constants/time-slots";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type {
   Delivery,
@@ -34,6 +35,7 @@ type RunRow = {
 type DeliveryRow = {
   id: string;
   run_id: string;
+  recipient_id: string;
   tracking_number: string;
   recipient_name: string;
   address: string;
@@ -51,6 +53,11 @@ type DeliveryRow = {
   last_absent_at: string | null;
   service_seconds: number;
   status: DeliveryStatus;
+  unavailable_until: string | null;
+  delivery_time_slot: DeliveryTimeSlot;
+  morning_notification_sent_at: string | null;
+  approaching_notification_sent_at: string | null;
+  reschedule_requested_at: string | null;
   version: number;
 };
 
@@ -97,7 +104,7 @@ function mapRun(row: RunRow): DeliveryRun {
   };
 }
 
-function mapDelivery(row: DeliveryRow): Delivery {
+function mapDelivery(row: DeliveryRow, lineLinked = false): Delivery {
   return {
     id: row.id,
     runId: row.run_id,
@@ -118,6 +125,12 @@ function mapDelivery(row: DeliveryRow): Delivery {
     lastAbsentAt: row.last_absent_at,
     serviceSeconds: row.service_seconds,
     status: row.status,
+    lineLinked,
+    unavailableUntil: row.unavailable_until,
+    deliveryTimeSlot: row.delivery_time_slot,
+    morningNotificationSentAt: row.morning_notification_sent_at,
+    approachingNotificationSentAt: row.approaching_notification_sent_at,
+    rescheduleRequestedAt: row.reschedule_requested_at,
     version: row.version,
   };
 }
@@ -126,30 +139,37 @@ export async function getRunResponse(
   runId: string,
 ): Promise<RunResponse | null> {
   const supabase = createSupabaseAdminClient();
-  const [runResult, deliveriesResult, stopsResult, legsResult, locationResult] =
-    await Promise.all([
-      supabase.from("delivery_runs").select("*").eq("id", runId).maybeSingle(),
-      supabase.from("deliveries").select("*").eq("run_id", runId),
-      supabase
-        .from("route_stops")
-        .select("*")
-        .eq("run_id", runId)
-        .order("stop_order"),
-      supabase
-        .from("route_legs")
-        .select(
-          "leg_order,distance_meters,duration_seconds,provider,route_geometry",
-        )
-        .eq("run_id", runId)
-        .order("leg_order"),
-      supabase
-        .from("driver_locations")
-        .select("latitude,longitude,recorded_at")
-        .eq("run_id", runId)
-        .order("recorded_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+  const [
+    runResult,
+    deliveriesResult,
+    stopsResult,
+    legsResult,
+    locationResult,
+    recipientsResult,
+  ] = await Promise.all([
+    supabase.from("delivery_runs").select("*").eq("id", runId).maybeSingle(),
+    supabase.from("deliveries").select("*").eq("run_id", runId),
+    supabase
+      .from("route_stops")
+      .select("*")
+      .eq("run_id", runId)
+      .order("stop_order"),
+    supabase
+      .from("route_legs")
+      .select(
+        "leg_order,distance_meters,duration_seconds,provider,route_geometry",
+      )
+      .eq("run_id", runId)
+      .order("leg_order"),
+    supabase
+      .from("driver_locations")
+      .select("latitude,longitude,recorded_at")
+      .eq("run_id", runId)
+      .order("recorded_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase.from("recipient_accounts").select("id,line_user_id"),
+  ]);
 
   const firstError = [
     runResult.error,
@@ -157,6 +177,7 @@ export async function getRunResponse(
     stopsResult.error,
     legsResult.error,
     locationResult.error,
+    recipientsResult.error,
   ].find(Boolean);
 
   if (firstError) {
@@ -168,10 +189,23 @@ export async function getRunResponse(
   }
 
   const deliveryRows = (deliveriesResult.data ?? []) as DeliveryRow[];
+  const linkedRecipientIds = new Set(
+    (
+      (recipientsResult.data ?? []) as Array<{
+        id: string;
+        line_user_id: string | null;
+      }>
+    )
+      .filter((recipient) => Boolean(recipient.line_user_id))
+      .map((recipient) => recipient.id),
+  );
   const stopRows = (stopsResult.data ?? []) as StopRow[];
   const legRows = (legsResult.data ?? []) as LegRow[];
   const deliveriesById = new Map(
-    deliveryRows.map((delivery) => [delivery.id, mapDelivery(delivery)]),
+    deliveryRows.map((delivery) => [
+      delivery.id,
+      mapDelivery(delivery, linkedRecipientIds.has(delivery.recipient_id)),
+    ]),
   );
   const legsByOrder = new Map(legRows.map((leg) => [leg.leg_order, leg]));
 
@@ -237,7 +271,7 @@ export async function getRecipientDelivery(
   }
 
   const deliveryRow = deliveryResult.data as DeliveryRow;
-  const [stopResult, runResult] = await Promise.all([
+  const [stopResult, runResult, recipientResult] = await Promise.all([
     supabase
       .from("route_stops")
       .select("*")
@@ -248,10 +282,15 @@ export async function getRecipientDelivery(
       .select("driver_name")
       .eq("id", deliveryRow.run_id)
       .maybeSingle(),
+    supabase
+      .from("recipient_accounts")
+      .select("line_user_id")
+      .eq("id", deliveryRow.recipient_id)
+      .maybeSingle(),
   ]);
 
-  if (stopResult.error || runResult.error) {
-    throw stopResult.error ?? runResult.error;
+  if (stopResult.error || runResult.error || recipientResult.error) {
+    throw stopResult.error ?? runResult.error ?? recipientResult.error;
   }
 
   if (!stopResult.data || !runResult.data) {
@@ -261,7 +300,13 @@ export async function getRecipientDelivery(
   const stop = stopResult.data as StopRow;
 
   return {
-    delivery: mapDelivery(deliveryRow),
+    delivery: mapDelivery(
+      deliveryRow,
+      Boolean(
+        (recipientResult.data as { line_user_id: string | null } | null)
+          ?.line_user_id,
+      ),
+    ),
     stop: {
       stopId: stop.id,
       stopOrder: stop.stop_order,
