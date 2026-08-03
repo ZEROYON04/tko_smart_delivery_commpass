@@ -1,28 +1,29 @@
 alter table public.delivery_runs
-  add column depot_name text not null default '東広島市役所 配送拠点',
-  add column depot_address text not null default '広島県東広島市西条栄町8番29号',
-  add column route_revision integer not null default 1,
-  add column route_provider text not null default 'mock',
-  add column optimized_at timestamptz,
-  add column optimization_note text;
+add column depot_name text not null default '東広島市役所 配送拠点',
+add column depot_address text not null default '広島県東広島市西条栄町8番29号',
+add column route_revision integer not null default 1,
+add column route_provider text not null default 'mock',
+add column optimized_at timestamptz,
+add column optimization_note text;
 
 alter table public.deliveries
-  add column carrier text not null default 'yamato'
-    check (carrier in ('yamato', 'sagawa', 'japan_post')),
-  add column requested_window_code text,
-  add column window_start timestamptz,
-  add column window_end timestamptz,
-  add column available_from timestamptz,
-  add column is_reattempt boolean not null default false,
-  add column reattempt_count integer not null default 0
-    check (reattempt_count >= 0),
-  add column last_absent_at timestamptz,
-  add constraint valid_delivery_window
-    check (window_start is null or window_end is null or window_end > window_start);
+add column carrier text not null default 'yamato' check (carrier in ('yamato', 'sagawa', 'japan_post')),
+add column requested_window_code text,
+add column window_start timestamptz,
+add column window_end timestamptz,
+add column available_from timestamptz,
+add column is_reattempt boolean not null default false,
+add column reattempt_count integer not null default 0 check (reattempt_count >= 0),
+add column last_absent_at timestamptz,
+add constraint valid_delivery_window check (
+  window_start is null
+  or window_end is null
+  or window_end > window_start
+);
 
 create table public.route_optimizations (
   id bigint generated always as identity primary key,
-  run_id uuid not null references public.delivery_runs(id) on delete cascade,
+  run_id uuid not null references public.delivery_runs (id) on delete cascade,
   revision integer not null,
   reason text not null,
   provider text not null,
@@ -31,22 +32,23 @@ create table public.route_optimizations (
   created_at timestamptz not null default now()
 );
 
-create index route_optimizations_run_created_idx
-  on public.route_optimizations(run_id, created_at desc);
+create index route_optimizations_run_created_idx on public.route_optimizations (run_id, created_at desc);
 
 alter table public.route_optimizations enable row level security;
 
-create policy "Allow demo read route optimizations"
-on public.route_optimizations for select to anon, authenticated using (true);
+create policy "Allow demo read route optimizations" on public.route_optimizations for
+select
+  to anon,
+  authenticated using (true);
 
-grant select on public.route_optimizations to anon, authenticated;
+grant
+select
+  on public.route_optimizations to anon,
+  authenticated;
 
-create or replace function public.recalculate_run_eta(p_run_id uuid)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
+create or replace function public.recalculate_run_eta (p_run_id uuid) returns void language plpgsql security definer
+set
+  search_path = public as $$
 declare
   run_record public.delivery_runs%rowtype;
   stop_record record;
@@ -105,19 +107,16 @@ begin
 end;
 $$;
 
-create or replace function public.schedule_delivery_reattempt(
+create or replace function public.schedule_delivery_reattempt (
   p_delivery_id uuid,
   p_expected_version integer,
   p_available_at timestamptz,
   p_window_code text,
   p_window_start timestamptz,
   p_window_end timestamptz
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+) returns jsonb language plpgsql security definer
+set
+  search_path = public as $$
 declare
   current_delivery public.deliveries%rowtype;
   updated_delivery public.deliveries%rowtype;
@@ -180,18 +179,15 @@ begin
 end;
 $$;
 
-create or replace function public.change_delivery_window(
+create or replace function public.change_delivery_window (
   p_delivery_id uuid,
   p_expected_version integer,
   p_window_code text,
   p_window_start timestamptz,
   p_window_end timestamptz
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+) returns jsonb language plpgsql security definer
+set
+  search_path = public as $$
 declare
   current_delivery public.deliveries%rowtype;
   updated_delivery public.deliveries%rowtype;
@@ -243,17 +239,14 @@ begin
 end;
 $$;
 
-create or replace function public.apply_active_route_plan(
+create or replace function public.apply_active_route_plan (
   p_run_id uuid,
   p_plan jsonb,
   p_provider text,
   p_reason text
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+) returns jsonb language plpgsql security definer
+set
+  search_path = public as $$
 declare
   prefix_count integer;
   next_revision integer;
@@ -390,16 +383,46 @@ begin
 end;
 $$;
 
-revoke execute on function public.schedule_delivery_reattempt(uuid, integer, timestamptz, text, timestamptz, timestamptz)
-  from public, anon, authenticated;
-revoke execute on function public.change_delivery_window(uuid, integer, text, timestamptz, timestamptz)
-  from public, anon, authenticated;
-revoke execute on function public.apply_active_route_plan(uuid, jsonb, text, text)
-  from public, anon, authenticated;
+revoke
+execute on function public.schedule_delivery_reattempt (
+  uuid,
+  integer,
+  timestamptz,
+  text,
+  timestamptz,
+  timestamptz
+)
+from
+  public,
+  anon,
+  authenticated;
 
-grant execute on function public.schedule_delivery_reattempt(uuid, integer, timestamptz, text, timestamptz, timestamptz)
-  to service_role;
-grant execute on function public.change_delivery_window(uuid, integer, text, timestamptz, timestamptz)
-  to service_role;
-grant execute on function public.apply_active_route_plan(uuid, jsonb, text, text)
-  to service_role;
+revoke
+execute on function public.change_delivery_window (uuid, integer, text, timestamptz, timestamptz)
+from
+  public,
+  anon,
+  authenticated;
+
+revoke
+execute on function public.apply_active_route_plan (uuid, jsonb, text, text)
+from
+  public,
+  anon,
+  authenticated;
+
+grant
+execute on function public.schedule_delivery_reattempt (
+  uuid,
+  integer,
+  timestamptz,
+  text,
+  timestamptz,
+  timestamptz
+) to service_role;
+
+grant
+execute on function public.change_delivery_window (uuid, integer, text, timestamptz, timestamptz) to service_role;
+
+grant
+execute on function public.apply_active_route_plan (uuid, jsonb, text, text) to service_role;

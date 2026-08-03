@@ -4,8 +4,7 @@ create table public.delivery_runs (
   id uuid primary key default gen_random_uuid(),
   driver_name text not null,
   delivery_date date not null default current_date,
-  status text not null default 'planned'
-    check (status in ('planned', 'active', 'completed')),
+  status text not null default 'planned' check (status in ('planned', 'active', 'completed')),
   current_stop_order integer not null default 0,
   depot_latitude double precision not null,
   depot_longitude double precision not null,
@@ -17,16 +16,22 @@ create table public.delivery_runs (
 
 create table public.deliveries (
   id uuid primary key default gen_random_uuid(),
-  run_id uuid not null references public.delivery_runs(id) on delete cascade,
+  run_id uuid not null references public.delivery_runs (id) on delete cascade,
   tracking_number text not null unique,
   recipient_name text not null,
   address text not null,
   latitude double precision not null,
   longitude double precision not null,
-  delivery_method text not null default 'handoff'
-    check (delivery_method in ('handoff', 'dropoff')),
-  status text not null default 'pending'
-    check (status in ('pending', 'out_for_delivery', 'delivered', 'absent', 'cancelled')),
+  delivery_method text not null default 'handoff' check (delivery_method in ('handoff', 'dropoff')),
+  status text not null default 'pending' check (
+    status in (
+      'pending',
+      'out_for_delivery',
+      'delivered',
+      'absent',
+      'cancelled'
+    )
+  ),
   service_seconds integer not null default 300 check (service_seconds >= 0),
   line_user_id text,
   version integer not null default 1,
@@ -36,8 +41,8 @@ create table public.deliveries (
 
 create table public.route_stops (
   id uuid primary key default gen_random_uuid(),
-  run_id uuid not null references public.delivery_runs(id) on delete cascade,
-  delivery_id uuid not null unique references public.deliveries(id) on delete cascade,
+  run_id uuid not null references public.delivery_runs (id) on delete cascade,
+  delivery_id uuid not null unique references public.deliveries (id) on delete cascade,
   stop_order integer not null,
   estimated_arrival timestamptz,
   arrived_at timestamptz,
@@ -50,11 +55,11 @@ create table public.route_stops (
 
 create table public.route_legs (
   id uuid primary key default gen_random_uuid(),
-  run_id uuid not null references public.delivery_runs(id) on delete cascade,
+  run_id uuid not null references public.delivery_runs (id) on delete cascade,
   leg_order integer not null,
   from_latitude double precision not null,
   from_longitude double precision not null,
-  to_stop_id uuid not null references public.route_stops(id) on delete cascade,
+  to_stop_id uuid not null references public.route_stops (id) on delete cascade,
   distance_meters integer not null check (distance_meters >= 0),
   duration_seconds integer not null check (duration_seconds >= 0),
   provider text not null default 'mock',
@@ -65,28 +70,24 @@ create table public.route_legs (
 
 create table public.driver_locations (
   id bigint generated always as identity primary key,
-  run_id uuid not null references public.delivery_runs(id) on delete cascade,
+  run_id uuid not null references public.delivery_runs (id) on delete cascade,
   latitude double precision not null,
   longitude double precision not null,
   recorded_at timestamptz not null default now()
 );
 
-create index driver_locations_run_recorded_idx
-  on public.driver_locations(run_id, recorded_at desc);
+create index driver_locations_run_recorded_idx on public.driver_locations (run_id, recorded_at desc);
 
 create table public.delivery_events (
   id bigint generated always as identity primary key,
-  delivery_id uuid not null references public.deliveries(id) on delete cascade,
+  delivery_id uuid not null references public.deliveries (id) on delete cascade,
   event_type text not null,
   old_value jsonb,
   new_value jsonb,
   created_at timestamptz not null default now()
 );
 
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-as $$
+create or replace function public.set_updated_at () returns trigger language plpgsql as $$
 begin
   new.updated_at = now();
   return new;
@@ -94,23 +95,20 @@ end;
 $$;
 
 create trigger delivery_runs_set_updated_at
-before update on public.delivery_runs
-for each row execute function public.set_updated_at();
+before update on public.delivery_runs for each row
+execute function public.set_updated_at ();
 
 create trigger deliveries_set_updated_at
-before update on public.deliveries
-for each row execute function public.set_updated_at();
+before update on public.deliveries for each row
+execute function public.set_updated_at ();
 
 create trigger route_stops_set_updated_at
-before update on public.route_stops
-for each row execute function public.set_updated_at();
+before update on public.route_stops for each row
+execute function public.set_updated_at ();
 
-create or replace function public.recalculate_run_eta(p_run_id uuid)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
+create or replace function public.recalculate_run_eta (p_run_id uuid) returns void language plpgsql security definer
+set
+  search_path = public as $$
 declare
   run_record public.delivery_runs%rowtype;
   stop_record record;
@@ -157,16 +155,13 @@ begin
 end;
 $$;
 
-create or replace function public.change_delivery_method(
+create or replace function public.change_delivery_method (
   p_delivery_id uuid,
   p_method text,
   p_expected_version integer
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+) returns jsonb language plpgsql security definer
+set
+  search_path = public as $$
 declare
   current_delivery public.deliveries%rowtype;
   updated_delivery public.deliveries%rowtype;
@@ -224,16 +219,13 @@ begin
 end;
 $$;
 
-create or replace function public.change_delivery_status(
+create or replace function public.change_delivery_status (
   p_delivery_id uuid,
   p_status text,
   p_expected_version integer
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+) returns jsonb language plpgsql security definer
+set
+  search_path = public as $$
 declare
   current_delivery public.deliveries%rowtype;
   updated_delivery public.deliveries%rowtype;
@@ -304,33 +296,83 @@ end;
 $$;
 
 alter table public.delivery_runs enable row level security;
+
 alter table public.deliveries enable row level security;
+
 alter table public.route_stops enable row level security;
+
 alter table public.route_legs enable row level security;
+
 alter table public.driver_locations enable row level security;
+
 alter table public.delivery_events enable row level security;
 
-create policy "Allow demo read delivery runs"
-on public.delivery_runs for select to anon, authenticated using (true);
-create policy "Allow demo read deliveries"
-on public.deliveries for select to anon, authenticated using (true);
-create policy "Allow demo read route stops"
-on public.route_stops for select to anon, authenticated using (true);
-create policy "Allow demo read route legs"
-on public.route_legs for select to anon, authenticated using (true);
-create policy "Allow demo read driver locations"
-on public.driver_locations for select to anon, authenticated using (true);
+create policy "Allow demo read delivery runs" on public.delivery_runs for
+select
+  to anon,
+  authenticated using (true);
 
-grant usage on schema public to anon, authenticated;
-grant select on public.delivery_runs, public.deliveries, public.route_stops,
-  public.route_legs, public.driver_locations to anon, authenticated;
+create policy "Allow demo read deliveries" on public.deliveries for
+select
+  to anon,
+  authenticated using (true);
 
-revoke execute on function public.recalculate_run_eta(uuid) from public, anon, authenticated;
-revoke execute on function public.change_delivery_method(uuid, text, integer) from public, anon, authenticated;
-revoke execute on function public.change_delivery_status(uuid, text, integer) from public, anon, authenticated;
-grant execute on function public.recalculate_run_eta(uuid) to service_role;
-grant execute on function public.change_delivery_method(uuid, text, integer) to service_role;
-grant execute on function public.change_delivery_status(uuid, text, integer) to service_role;
+create policy "Allow demo read route stops" on public.route_stops for
+select
+  to anon,
+  authenticated using (true);
+
+create policy "Allow demo read route legs" on public.route_legs for
+select
+  to anon,
+  authenticated using (true);
+
+create policy "Allow demo read driver locations" on public.driver_locations for
+select
+  to anon,
+  authenticated using (true);
+
+grant usage on schema public to anon,
+authenticated;
+
+grant
+select
+  on public.delivery_runs,
+  public.deliveries,
+  public.route_stops,
+  public.route_legs,
+  public.driver_locations to anon,
+  authenticated;
+
+revoke
+execute on function public.recalculate_run_eta (uuid)
+from
+  public,
+  anon,
+  authenticated;
+
+revoke
+execute on function public.change_delivery_method (uuid, text, integer)
+from
+  public,
+  anon,
+  authenticated;
+
+revoke
+execute on function public.change_delivery_status (uuid, text, integer)
+from
+  public,
+  anon,
+  authenticated;
+
+grant
+execute on function public.recalculate_run_eta (uuid) to service_role;
+
+grant
+execute on function public.change_delivery_method (uuid, text, integer) to service_role;
+
+grant
+execute on function public.change_delivery_status (uuid, text, integer) to service_role;
 
 do $$
 begin

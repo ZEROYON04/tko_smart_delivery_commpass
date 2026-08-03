@@ -1,28 +1,24 @@
 alter table public.deliveries
-  add column dropoff_location text
-    check (
-      dropoff_location is null
-      or dropoff_location in (
-        'front_door',
-        'delivery_box',
-        'gas_meter_box',
-        'bicycle_basket',
-        'building_reception',
-        'other'
-      )
-    );
+add column dropoff_location text check (
+  dropoff_location is null
+  or dropoff_location in (
+    'front_door',
+    'delivery_box',
+    'gas_meter_box',
+    'bicycle_basket',
+    'building_reception',
+    'other'
+  )
+);
 
-create or replace function public.change_delivery_method_details(
+create or replace function public.change_delivery_method_details (
   p_delivery_id uuid,
   p_method text,
   p_dropoff_location text,
   p_expected_version integer
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+) returns jsonb language plpgsql security definer
+set
+  search_path = public as $$
 declare
   current_delivery public.deliveries%rowtype;
   updated_delivery public.deliveries%rowtype;
@@ -101,15 +97,9 @@ begin
 end;
 $$;
 
-create or replace function public.change_run_delivery_date(
-  p_run_id uuid,
-  p_delivery_date date
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+create or replace function public.change_run_delivery_date (p_run_id uuid, p_delivery_date date) returns jsonb language plpgsql security definer
+set
+  search_path = public as $$
 declare
   current_run public.delivery_runs%rowtype;
   day_offset integer;
@@ -181,12 +171,22 @@ begin
 end;
 $$;
 
-revoke execute on function public.change_delivery_method_details(uuid, text, text, integer)
-  from public, anon, authenticated;
-revoke execute on function public.change_run_delivery_date(uuid, date)
-  from public, anon, authenticated;
+revoke
+execute on function public.change_delivery_method_details (uuid, text, text, integer)
+from
+  public,
+  anon,
+  authenticated;
 
-grant execute on function public.change_delivery_method_details(uuid, text, text, integer)
-  to service_role;
-grant execute on function public.change_run_delivery_date(uuid, date)
-  to service_role;
+revoke
+execute on function public.change_run_delivery_date (uuid, date)
+from
+  public,
+  anon,
+  authenticated;
+
+grant
+execute on function public.change_delivery_method_details (uuid, text, text, integer) to service_role;
+
+grant
+execute on function public.change_run_delivery_date (uuid, date) to service_role;
