@@ -160,6 +160,38 @@ export function DriverDashboard({ runId }: { runId: string }) {
     }
   }
 
+  async function simulateMorningNotifications() {
+    setUpdating(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/runs/${runId}/notifications/morning`, {
+        method: "POST",
+      });
+      const body = (await response.json()) as {
+        sent?: number;
+        skipped?: number;
+        failed?: number;
+        message?: string;
+      };
+      if (!response.ok) {
+        throw new Error(body.message ?? "朝の通知を実行できませんでした。");
+      }
+      setNotice({
+        title: `朝の自動通知を${body.sent ?? 0}件送信しました。`,
+        body: `送信済み・未連携など${body.skipped ?? 0}件、失敗${body.failed ?? 0}件です。二重送信は防止されます。`,
+      });
+      await loadData();
+    } catch (notificationError) {
+      setError(
+        notificationError instanceof Error
+          ? notificationError.message
+          : "朝の通知を実行できませんでした。",
+      );
+    } finally {
+      setUpdating(false);
+    }
+  }
+
   function updateLocation() {
     if (!navigator.geolocation) {
       setLocationMessage("この端末では位置情報を利用できません。");
@@ -281,6 +313,15 @@ export function DriverDashboard({ runId }: { runId: string }) {
             </div>
           </div>
         </div>
+
+        <button
+          className="mb-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-bold text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
+          disabled={updating}
+          onClick={() => void simulateMorningNotifications()}
+          type="button"
+        >
+          朝8時の自動通知をデモ実行
+        </button>
 
         {notice && (
           <div

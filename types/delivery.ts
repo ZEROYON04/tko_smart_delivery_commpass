@@ -1,3 +1,5 @@
+import type { DeliveryTimeSlot } from "@/lib/constants/time-slots";
+
 export type DeliveryMethod = "handoff" | "dropoff";
 
 export type DeliveryStatus =
@@ -16,6 +18,12 @@ export type Delivery = {
   deliveryMethod: DeliveryMethod;
   serviceSeconds: number;
   status: DeliveryStatus;
+  lineLinked: boolean;
+  unavailableUntil: string | null;
+  deliveryTimeSlot: DeliveryTimeSlot;
+  morningNotificationSentAt: string | null;
+  approachingNotificationSentAt: string | null;
+  rescheduleRequestedAt: string | null;
   version: number;
 };
 

@@ -4,12 +4,20 @@ import {
   deliveryMethodRequestSchema,
   methodResultSchema,
 } from "@/lib/validation/delivery";
+import { isRecipientRequestAuthorized } from "@/lib/security/recipient-link";
 
 type RouteContext = { params: Promise<{ deliveryId: string }> };
 
 export async function PATCH(request: Request, context: RouteContext) {
   const { deliveryId } = await context.params;
   let body: unknown;
+
+  if (!isRecipientRequestAuthorized(request, deliveryId)) {
+    return NextResponse.json(
+      { message: "リンクが無効か、期限切れです。" },
+      { status: 403 },
+    );
+  }
 
   try {
     body = await request.json();

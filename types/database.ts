@@ -15,6 +15,7 @@ export type Database = {
       route_legs: { Row: Record<string, Json> };
       driver_locations: { Row: Record<string, Json> };
       delivery_events: { Row: Record<string, Json> };
+      recipient_accounts: { Row: Record<string, Json> };
     };
     Views: Record<string, never>;
     Functions: {

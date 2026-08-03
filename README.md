@@ -4,7 +4,7 @@
 
 受取人が「対面受取」から「置き配」へ変更すると、Supabase Realtimeを通じてドライバー画面へ反映されます。配送順は固定したまま、短縮された滞在時間を使って後続地点の到着予定時刻（ETA）だけを前倒しします。
 
-> このリポジトリはモック環境です。実際のLINE Messaging API、Amazon Location Service、配送会社データには接続していません。
+> 配送情報・経路はモックです。LINE Messaging APIは公式アカウントと接続して動作確認できます。Amazon Location Serviceと配送会社データには接続していません。
 
 ## 技術スタック
 
@@ -28,6 +28,14 @@
 - 配達完了・不在処理
 - ブラウザ位置情報を使ったドライバー現在地更新
 - バージョン番号を使った同時更新防止
+- 初回1回のお客様コードによるLINE連携
+- 当日朝の配送予定・時間帯通知（二重送信防止）
+- LINEからの「今日は受け取れない」連絡
+- 配達直前の「あと何件・約何分」通知
+- LINEからの在宅・10分不在・30分不在連絡
+- 受取人画面を開く36時間有効の署名付きリンク
+
+LINE連携の準備と発表用の進行は [LINE連携デモガイド](docs/line-demo.md) を参照してください。
 
 ## デモID
 
@@ -126,6 +134,8 @@ Next.jsを停止せずSupabase操作を行う場合は、ターミナルを2つ�
 - Mailpit: http://localhost:54324
 
 ## デモ手順
+
+LINE連携を含むデモは [LINE連携デモガイド](docs/line-demo.md) の手順を使用してください。以下は受取方法・ETA再計算だけを確認する従来のWebデモです。
 
 1. ドライバー画面と受取人画面を別タブで開く
 2. 両方の画面で3件目が「対面受取・滞在5分」であることを確認
@@ -229,7 +239,7 @@ wsl --shutdown
 
 ### LINE
 
-現在の受取人Web画面を、LINE Messaging APIからNext.js Webhookを呼び出す構成へ差し替えます。Webhookから同じ `change_delivery_method` DB関数を利用できます。
+LINE Messaging APIのPush・Reply・Webhookを実装済みです。現在は当日朝の通知をドライバー画面のデモボタンから実行し、配達直前通知も各荷物のボタンから実行します。本番では同じAPIをEventBridge Schedulerなどから呼び出します。
 
 ### AWS
 
@@ -241,7 +251,8 @@ wsl --shutdown
 
 ## 現在の未実装範囲
 
-- 実際のLINEログイン・Webhook・公式アカウント
+- 配達直前通知のスケジュール自動実行
+- LINE連携解除・お客様コード再発行の運用画面
 - Amazon Location Service / Google Maps
 - 本番用ドライバー認証・受取人認証
 - 配送ルートの自動最適化
