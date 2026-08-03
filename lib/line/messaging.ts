@@ -78,13 +78,14 @@ export function createDeliveryNoticeMessage({
   return {
     type: "text",
     text: [
-      "【スマート配送コンパス】本日、荷物をお届けします。",
-      `お問い合わせ番号：${trackingNumber}`,
+      "🚚 スマ配｜まもなくお届け",
+      "━━━━━━━━━━━━",
+      `📦 荷物番号　${trackingNumber}`,
       "",
-      `現在、あなたの前にあと${remainingStops}件です。`,
-      `到着まで約${estimatedMinutes}分の見込みです。`,
+      `📍 あと ${remainingStops}件`,
+      `⏱️ 到着まで 約${estimatedMinutes}分`,
       "",
-      "急な予定がある場合は、下のボタンでお知らせください。",
+      "現在の状況を下のボタンからお知らせください。",
     ].join("\n"),
     quickReply: {
       items: [
@@ -141,12 +142,13 @@ export function createMorningDeliveryNoticeMessage({
   return {
     type: "text",
     text: [
-      "【スマート配送コンパス】本日、荷物をお届けします。",
-      `お届け日：${formattedDate}`,
-      `お届け時間帯：${DELIVERY_TIME_SLOT_LABELS[timeSlot]}`,
-      `お問い合わせ番号：${trackingNumber}`,
+      "📦 スマ配｜本日のお届け",
+      "━━━━━━━━━━━━",
+      `📅 お届け日　${formattedDate}`,
+      `🕐 時間帯　　${DELIVERY_TIME_SLOT_LABELS[timeSlot]}`,
+      `🔢 荷物番号　${trackingNumber}`,
       "",
-      "本日受け取れない場合は、下のボタンからお知らせください。",
+      "配達状況の確認や予定変更は、下のボタンから行えます。",
     ].join("\n"),
     quickReply: {
       items: [
@@ -163,6 +165,97 @@ export function createMorningDeliveryNoticeMessage({
           action: {
             type: "postback",
             label: "今日は受け取れない",
+            data: new URLSearchParams({
+              action: "unavailable_today",
+              deliveryId,
+            }).toString(),
+            displayText: "今日は受け取れません",
+          },
+        },
+      ],
+    },
+  };
+}
+
+export function createDeliveryStatusMenuMessage({
+  trackingNumber,
+  recipientUrl,
+}: {
+  trackingNumber: string;
+  recipientUrl: string;
+}): LineMessage {
+  return {
+    type: "text",
+    text: [
+      "🚚 スマ配｜配達状況",
+      "━━━━━━━━━━━━",
+      `📦 荷物番号　${trackingNumber}`,
+      "",
+      "到着目安・配送順・受取方法を確認できます。",
+    ].join("\n"),
+    quickReply: {
+      items: [
+        {
+          type: "action",
+          action: {
+            type: "uri",
+            label: "配達状況を開く",
+            uri: recipientUrl,
+          },
+        },
+      ],
+    },
+  };
+}
+
+export function createDeliveryPlanMenuMessage({
+  deliveryId,
+  trackingNumber,
+}: {
+  deliveryId: string;
+  trackingNumber: string;
+}): LineMessage {
+  return {
+    type: "text",
+    text: [
+      "🔄 スマ配｜受取予定変更",
+      "━━━━━━━━━━━━",
+      `📦 荷物番号　${trackingNumber}`,
+      "",
+      "現在の状況を下のボタンから選んでください。",
+    ].join("\n"),
+    quickReply: {
+      items: [
+        {
+          type: "action",
+          action: {
+            type: "postback",
+            label: "在宅しています",
+            data: new URLSearchParams({
+              action: "available",
+              deliveryId,
+            }).toString(),
+            displayText: "在宅しています",
+          },
+        },
+        ...[10, 30].map((minutes) => ({
+          type: "action" as const,
+          action: {
+            type: "postback" as const,
+            label: `${minutes}分不在`,
+            data: new URLSearchParams({
+              action: "temporarily_unavailable",
+              deliveryId,
+              minutes: String(minutes),
+            }).toString(),
+            displayText: `${minutes}分ほど不在です`,
+          },
+        })),
+        {
+          type: "action",
+          action: {
+            type: "postback",
+            label: "今日は受取不可",
             data: new URLSearchParams({
               action: "unavailable_today",
               deliveryId,
