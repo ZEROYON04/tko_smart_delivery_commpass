@@ -7,6 +7,11 @@ import {
   type LineMessage,
   replyLineMessages,
 } from "@/lib/line/messaging";
+import { createRecipientUrl } from "@/lib/line/recipient-url";
+import { getRunResponse } from "@/lib/data/deliveries";
+import { optimizeDeliveryRun } from "@/lib/routing/optimize-run";
+import { formatWindowLabel } from "@/lib/scheduling/time-slots";
+import { assessWindowFeasibility } from "@/lib/scheduling/window-feasibility";
 import {
   extractCustomerCode,
   extractMenuCommand,
@@ -15,7 +20,6 @@ import {
   type LineWebhookEvent,
   verifyLineSignature,
 } from "@/lib/line/webhook";
-import { createRecipientAccessQuery } from "@/lib/security/recipient-link";
 
 export const runtime = "nodejs";
 
@@ -94,22 +98,6 @@ async function findRedelivery(lineUserId: string) {
   return data;
 }
 
-function createRecipientUrl(
-  deliveryId: string,
-  view: "overview" | "schedule" | "redelivery",
-) {
-  const publicSiteUrl = (
-    process.env.LINE_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL
-  )?.replace(/\/$/, "");
-  if (!publicSiteUrl)
-    throw new Error("LINE_PUBLIC_SITE_URL is not configured.");
-
-  const accessQuery = createRecipientAccessQuery(deliveryId);
-  accessQuery.set("view", view);
-  const anchor = view === "overview" ? "" : `#${view}`;
-  return `${publicSiteUrl}/recipient/${deliveryId}?${accessQuery}${anchor}`;
-}
-
 async function handleMenuCommand(
   event: LineWebhookEvent,
   command: LineMenuCommand,
@@ -135,7 +123,7 @@ async function handleMenuCommand(
         "",
         "🔗 初回連携",
         "　「初回連携 お客様コード」と送信してください。",
-        "　例：初回連携 USER-A",
+        "　例：初回連携 USER-C",
       ].join("\n"),
     );
     return;
@@ -272,7 +260,9 @@ async function handleAvailability(event: LineWebhookEvent) {
   const supabase = createSupabaseAdminClient();
   const { data: delivery, error: findError } = await supabase
     .from("deliveries")
-    .select("id,recipient_id")
+    .select(
+      "id,recipient_id,run_id,version,tracking_number,carrier,requested_window_code,window_end,service_seconds",
+    )
     .eq("id", deliveryId)
     .maybeSingle();
 
@@ -296,6 +286,13 @@ async function handleAvailability(event: LineWebhookEvent) {
 
   if (action === "unavailable_today") {
     const requestedAt = new Date().toISOString();
+    const { error: statusError } = await supabase.rpc("change_delivery_status", {
+      p_delivery_id: deliveryId,
+      p_status: "absent",
+      p_expected_version: delivery.version,
+    });
+    if (statusError) throw statusError;
+
     const { error: updateError } = await supabase
       .from("deliveries")
       .update({ reschedule_requested_at: requestedAt })
@@ -309,15 +306,35 @@ async function handleAvailability(event: LineWebhookEvent) {
       new_value: { requestedAt },
     });
 
-    await reply(
-      event.replyToken,
-      [
-        "✅ 予定変更を受け付けました",
-        "━━━━━━━━━━━━",
-        "本日受け取れない旨をドライバーへ共有しました。",
-        "日時変更待ちとして登録しました。",
-      ].join("\n"),
-    );
+    try {
+      await optimizeDeliveryRun(
+        delivery.run_id,
+        `recipient-unavailable-today:${deliveryId}`,
+      );
+    } catch (optimizationError) {
+      if (
+        !(optimizationError instanceof Error) ||
+        optimizationError.message !== "NO_ACTIVE_DELIVERIES"
+      ) {
+        throw optimizationError;
+      }
+    }
+
+    await replyMessages(event.replyToken, [
+      {
+        type: "text",
+        text: [
+          "承知しました",
+          "━━━━━━━━━━━━",
+          "本日は受け取れない旨をドライバーへ共有しました。",
+          "現在の配送枠ではお届けできないため、下のボタンから新しい日時を指定してください。",
+        ].join("\n"),
+      },
+      createDeliveryDateChangeMenuMessage({
+        trackingNumber: delivery.tracking_number,
+        recipientUrl: createRecipientUrl(deliveryId, "schedule"),
+      }),
+    ]);
     return;
   }
 
@@ -344,20 +361,72 @@ async function handleAvailability(event: LineWebhookEvent) {
     new_value: { unavailableUntil, minutes: unavailableUntil ? minutes : null },
   });
 
+  await optimizeDeliveryRun(
+    delivery.run_id,
+    unavailableUntil
+      ? `temporary-absence:${deliveryId}:${minutes}min`
+      : `recipient-available:${deliveryId}`,
+  );
+
+  if (unavailableUntil) {
+    const updatedRun = await getRunResponse(delivery.run_id);
+    const updatedStop = updatedRun?.stops.find(
+      (stop) => stop.delivery.id === deliveryId,
+    );
+    const feasibility = assessWindowFeasibility({
+      estimatedArrival: updatedStop?.estimatedArrival ?? null,
+      unavailableUntil,
+      serviceSeconds: delivery.service_seconds,
+      windowEnd: delivery.window_end,
+    });
+
+    if (feasibility.canCompleteWithinWindow && feasibility.serviceStart) {
+      const revisedEta = new Intl.DateTimeFormat("ja-JP", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Tokyo",
+      }).format(new Date(feasibility.serviceStart));
+      await reply(
+        event.replyToken,
+        [
+          "承知しました",
+          "━━━━━━━━━━━━",
+          `⏱️ ${minutes}分間の不在予定をドライバーへ共有しました。`,
+          "同じ配送枠の中で、別の荷物を先に回ってからお伺いします。",
+          `🚚 更新後の到着目安　${revisedEta}ごろ`,
+          `🕐 配送枠　${formatWindowLabel(delivery.carrier, delivery.requested_window_code)}`,
+        ].join("\n"),
+      );
+      return;
+    }
+
+    await replyMessages(event.replyToken, [
+      {
+        type: "text",
+        text: [
+          "ご連絡ありがとうございます",
+          "━━━━━━━━━━━━",
+          `⏱️ ${minutes}分間の不在予定をドライバーへ共有しました。`,
+          "経路を再計算しましたが、現在の配送枠内での再訪が難しい見込みです。",
+          "下のボタンから、ご都合のよい日時へ変更してください。",
+        ].join("\n"),
+      },
+      createDeliveryDateChangeMenuMessage({
+        trackingNumber: delivery.tracking_number,
+        recipientUrl: createRecipientUrl(deliveryId, "schedule"),
+      }),
+    ]);
+    return;
+  }
+
   await reply(
     event.replyToken,
-    unavailableUntil
-      ? [
-          "✅ 短時間不在を受け付けました",
-          "━━━━━━━━━━━━",
-          `⏱️ 不在予定　${minutes}分間`,
-          "ドライバーへ共有しました。",
-        ].join("\n")
-      : [
-          "✅ 在宅連絡を受け付けました",
-          "━━━━━━━━━━━━",
-          "🏠 在宅予定としてドライバーへ共有しました。",
-        ].join("\n"),
+    [
+      "✅ 在宅連絡を受け付けました",
+      "━━━━━━━━━━━━",
+      "🏠 在宅予定としてドライバーへ共有しました。",
+      "配送枠を守るよう、配送順と到着目安を更新しました。",
+    ].join("\n"),
   );
 }
 
@@ -376,7 +445,7 @@ async function handleEvent(event: LineWebhookEvent) {
         "",
         "はじめに、お客様コードを使って初回連携を行ってください。",
         "",
-        "入力例：初回連携 USER-A",
+        "入力例：初回連携 USER-C",
         "",
         "※連携は初回の1回だけです。",
       ].join("\n"),

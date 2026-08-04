@@ -31,6 +31,37 @@ describe("optimizeRoute", () => {
     expect(result.feasible).toBe(true);
   });
 
+  it("visits another stop instead of waiting outside during a short absence", () => {
+    const result = optimizeRoute({
+      startTime: new Date("2026-08-04T10:00:00+09:00"),
+      stops: [
+        {
+          id: "temporarily-absent",
+          serviceSeconds: 60,
+          availableFrom: "2026-08-04T10:10:00+09:00",
+          allowWaiting: false,
+        },
+        { id: "other-delivery", serviceSeconds: 60 },
+      ],
+      durations: [
+        [0, 20, 60],
+        [20, 0, 60],
+        [60, 600, 0],
+      ],
+      distances: [
+        [0, 100, 500],
+        [100, 0, 500],
+        [500, 5_000, 0],
+      ],
+    });
+
+    expect(result.orderedStopIds).toEqual([
+      "other-delivery",
+      "temporarily-absent",
+    ]);
+    expect(result.feasible).toBe(true);
+  });
+
   it("rejects orders that miss a delivery window", () => {
     const result = optimizeRoute({
       startTime: new Date("2026-08-03T10:00:00+09:00"),
@@ -116,5 +147,45 @@ describe("optimizeRoute", () => {
     });
 
     expect(result.feasible).toBe(false);
+  });
+
+  it("uses the scalable time-window-first route for a large delivery run", () => {
+    const stopCount = 20;
+    const stops = Array.from({ length: stopCount }, (_, index) => ({
+      id: `stop-${index + 1}`,
+      serviceSeconds: 60,
+      preferredFirst: index === 4,
+      windowStart:
+        index < 10
+          ? "2026-08-04T08:00:00+09:00"
+          : "2026-08-04T12:00:00+09:00",
+      windowEnd:
+        index < 10
+          ? "2026-08-04T12:00:00+09:00"
+          : "2026-08-04T14:00:00+09:00",
+    }));
+    const matrixSize = stopCount + 1;
+    const durations = Array.from({ length: matrixSize }, (_, from) =>
+      Array.from({ length: matrixSize }, (_, to) =>
+        from === to ? 0 : Math.abs(from - to) * 30,
+      ),
+    );
+    const distances = durations.map((row) =>
+      row.map((duration) => duration * 10),
+    );
+
+    const result = optimizeRoute({
+      startTime: new Date("2026-08-04T08:00:00+09:00"),
+      stops,
+      durations,
+      distances,
+    });
+
+    expect(result.orderedStopIds).toHaveLength(20);
+    expect(result.orderedStopIds[0]).toBe("stop-5");
+    expect(new Set(result.orderedStopIds.slice(0, 10))).toEqual(
+      new Set(Array.from({ length: 10 }, (_, index) => `stop-${index + 1}`)),
+    );
+    expect(result.feasible).toBe(true);
   });
 });

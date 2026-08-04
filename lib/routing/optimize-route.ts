@@ -2,6 +2,8 @@ export type OptimizableStop = {
   id: string;
   serviceSeconds: number;
   availableFrom?: string | null;
+  allowWaiting?: boolean;
+  preferredFirst?: boolean;
   windowStart?: string | null;
   windowEnd?: string | null;
 };
@@ -33,6 +35,8 @@ type SearchState = {
   waitingSeconds: number;
 };
 
+const EXACT_SEARCH_STOP_LIMIT = 9;
+
 function earliestServiceTime(stop: OptimizableStop, arrivalMs: number) {
   const availableMs = stop.availableFrom
     ? new Date(stop.availableFrom).getTime()
@@ -45,6 +49,14 @@ function earliestServiceTime(stop: OptimizableStop, arrivalMs: number) {
 
 function isInsideWindow(stop: OptimizableStop, serviceEndMs: number) {
   return !stop.windowEnd || serviceEndMs <= new Date(stop.windowEnd).getTime();
+}
+
+function canServeAfterArrival(
+  stop: OptimizableStop,
+  arrivalMs: number,
+  serviceStartMs: number,
+) {
+  return stop.allowWaiting !== false || serviceStartMs <= arrivalMs;
 }
 
 function toResult(
@@ -63,8 +75,9 @@ function toResult(
   };
 }
 
-function greedyFallback(input: RouteOptimizationInput) {
+function greedyRoute(input: RouteOptimizationInput, knownInfeasible = false) {
   const remaining = input.stops.map((_, index) => index);
+  let feasible = !knownInfeasible;
   const state: SearchState = {
     path: [],
     visited: input.stops.map(() => false),
@@ -76,7 +89,40 @@ function greedyFallback(input: RouteOptimizationInput) {
   };
 
   while (remaining.length > 0) {
-    remaining.sort((left, right) => {
+    const immediatelyReachable = remaining.filter((index) => {
+      const duration = input.durations[state.matrixIndex][index + 1] ?? 0;
+      const arrivalMs = state.cursorMs + duration * 1_000;
+      const serviceStartMs = earliestServiceTime(input.stops[index], arrivalMs);
+      return canServeAfterArrival(
+        input.stops[index],
+        arrivalMs,
+        serviceStartMs,
+      );
+    });
+    const candidates =
+      immediatelyReachable.length > 0 ? immediatelyReachable : remaining;
+    if (immediatelyReachable.length === 0) feasible = false;
+
+    candidates.sort((left, right) => {
+      if (state.path.length === 0) {
+        const canStartImmediately = (index: number) => {
+          const duration = input.durations[state.matrixIndex][index + 1] ?? 0;
+          const arrivalMs = state.cursorMs + duration * 1_000;
+          return (
+            earliestServiceTime(input.stops[index], arrivalMs) <= arrivalMs
+          );
+        };
+        const priorityDifference =
+          Number(
+            Boolean(input.stops[right].preferredFirst) &&
+              canStartImmediately(right),
+          ) -
+          Number(
+            Boolean(input.stops[left].preferredFirst) &&
+              canStartImmediately(left),
+          );
+        if (priorityDifference !== 0) return priorityDifference;
+      }
       const leftEnd = input.stops[left].windowEnd
         ? new Date(input.stops[left].windowEnd!).getTime()
         : Number.POSITIVE_INFINITY;
@@ -92,21 +138,25 @@ function greedyFallback(input: RouteOptimizationInput) {
       );
     });
 
-    const next = remaining.shift()!;
+    const next = candidates[0];
+    remaining.splice(remaining.indexOf(next), 1);
     const duration = input.durations[state.matrixIndex][next + 1] ?? 0;
     const distance = input.distances[state.matrixIndex][next + 1] ?? 0;
     const arrivalMs = state.cursorMs + duration * 1_000;
     const serviceStartMs = earliestServiceTime(input.stops[next], arrivalMs);
+    const serviceEndMs =
+      serviceStartMs + input.stops[next].serviceSeconds * 1_000;
+    if (!isInsideWindow(input.stops[next], serviceEndMs)) feasible = false;
 
     state.path.push(next);
     state.travelSeconds += duration;
     state.distanceMeters += distance;
     state.waitingSeconds += Math.max(0, (serviceStartMs - arrivalMs) / 1_000);
-    state.cursorMs = serviceStartMs + input.stops[next].serviceSeconds * 1_000;
+    state.cursorMs = serviceEndMs;
     state.matrixIndex = next + 1;
   }
 
-  return toResult(input, state, false);
+  return toResult(input, state, feasible);
 }
 
 export function optimizeRoute(input: RouteOptimizationInput): OptimizedRoute {
@@ -120,6 +170,10 @@ export function optimizeRoute(input: RouteOptimizationInput): OptimizedRoute {
       finishedAt: input.startTime.toISOString(),
       feasible: true,
     };
+  }
+
+  if (input.stops.length > EXACT_SEARCH_STOP_LIMIT) {
+    return greedyRoute(input);
   }
 
   let bestState: SearchState | null = null;
@@ -157,6 +211,11 @@ export function optimizeRoute(input: RouteOptimizationInput): OptimizedRoute {
 
       const arrivalMs = state.cursorMs + duration * 1_000;
       const serviceStartMs = earliestServiceTime(input.stops[index], arrivalMs);
+      if (
+        !canServeAfterArrival(input.stops[index], arrivalMs, serviceStartMs)
+      ) {
+        continue;
+      }
       const serviceEndMs =
         serviceStartMs + input.stops[index].serviceSeconds * 1_000;
       if (!isInsideWindow(input.stops[index], serviceEndMs)) continue;
@@ -178,5 +237,7 @@ export function optimizeRoute(input: RouteOptimizationInput): OptimizedRoute {
   }
 
   visit(initialState);
-  return bestState ? toResult(input, bestState, true) : greedyFallback(input);
+  return bestState
+    ? toResult(input, bestState, true)
+    : greedyRoute(input, true);
 }

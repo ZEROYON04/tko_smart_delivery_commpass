@@ -4,9 +4,9 @@ import {
   createMorningDeliveryNoticeMessage,
   pushLineMessages,
 } from "@/lib/line/messaging";
+import { createRecipientUrl } from "@/lib/line/recipient-url";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { DeliveryTimeSlot } from "@/lib/constants/time-slots";
-import { createRecipientAccessQuery } from "@/lib/security/recipient-link";
 
 type MorningDeliveryRow = {
   id: string;
@@ -18,13 +18,6 @@ type MorningDeliveryRow = {
 
 export async function sendMorningNotifications(runId: string) {
   const supabase = createSupabaseAdminClient();
-  const publicSiteUrl = (
-    process.env.LINE_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL
-  )?.replace(/\/$/, "");
-
-  if (!publicSiteUrl) {
-    throw new Error("LINE_PUBLIC_SITE_URL is not configured.");
-  }
   const [runResult, deliveriesResult, recipientsResult] = await Promise.all([
     supabase
       .from("delivery_runs")
@@ -83,14 +76,13 @@ export async function sendMorningNotifications(runId: string) {
     }
 
     try {
-      const accessQuery = createRecipientAccessQuery(delivery.id);
       await pushLineMessages(lineUserId, [
         createMorningDeliveryNoticeMessage({
           deliveryId: delivery.id,
           trackingNumber: delivery.tracking_number,
           deliveryDate: runResult.data.delivery_date,
           timeSlot: delivery.delivery_time_slot,
-          recipientUrl: `${publicSiteUrl}/recipient/${delivery.id}?${accessQuery}`,
+          recipientUrl: createRecipientUrl(delivery.id),
         }),
       ]);
       sent += 1;

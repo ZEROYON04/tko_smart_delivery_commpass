@@ -58,6 +58,18 @@ export function DriverDashboard({ runId }: { runId: string }) {
                   nextStop.delivery.dropoffLocation)
             );
           });
+          const availabilityChangedStop = nextData.stops.find((nextStop) => {
+            const previousStop = previousData.stops.find(
+              (candidate) => candidate.delivery.id === nextStop.delivery.id,
+            );
+            return (
+              previousStop &&
+              (previousStop.delivery.unavailableUntil !==
+                nextStop.delivery.unavailableUntil ||
+                previousStop.delivery.rescheduleRequestedAt !==
+                  nextStop.delivery.rescheduleRequestedAt)
+            );
+          });
 
           if (changedStop) {
             const method =
@@ -70,12 +82,29 @@ export function DriverDashboard({ runId }: { runId: string }) {
               title: `${changedStop.stopOrder}番目の荷物が${method}へ変更されました。`,
               body: "後続の到着予定時刻を更新しました。配送順は変更されていません。",
             });
+          } else if (availabilityChangedStop) {
+            setNotice({
+              title: availabilityChangedStop.delivery.unavailableUntil
+                ? `${availabilityChangedStop.delivery.recipientName}さんから短時間不在の連絡が届きました。`
+                : availabilityChangedStop.delivery.rescheduleRequestedAt
+                  ? `${availabilityChangedStop.delivery.recipientName}さんから本日不在の連絡が届きました。`
+                  : `${availabilityChangedStop.delivery.recipientName}さんが在宅へ変更しました。`,
+              body: "在宅予定を反映し、残りの配送順と到着予定を再計算します。",
+            });
           } else if (
             nextData.run.routeRevision !== previousData.run.routeRevision
           ) {
+            const movedStop = nextData.stops.find((nextStop) => {
+              const previousStop = previousData.stops.find(
+                (candidate) => candidate.delivery.id === nextStop.delivery.id,
+              );
+              return previousStop && previousStop.stopOrder !== nextStop.stopOrder;
+            });
             setNotice({
               title: "配送ルートを更新しました。",
-              body: "道路所要時間・在宅予定・配送時間帯を基に順番とETAを再計算しました。",
+              body: movedStop
+                ? `${movedStop.delivery.recipientName}さんの訪問順を${movedStop.stopOrder}番目へ変更し、ETAを再計算しました。`
+                : "道路所要時間・在宅予定・配送時間帯を基に順番とETAを再計算しました。",
             });
           }
         }
@@ -194,6 +223,9 @@ export function DriverDashboard({ runId }: { runId: string }) {
             : "配達状態を更新できませんでした。",
         );
       }
+      const statusResult = body as {
+        lineNotification?: "sent" | "skipped" | "failed";
+      };
 
       const locationResponse = await fetch(`/api/runs/${runId}/location`, {
         method: "POST",
@@ -222,8 +254,12 @@ export function DriverDashboard({ runId }: { runId: string }) {
             : "ご不在として記録しました。",
         body:
           status === "delivered"
-            ? "現在地を更新し、次の配送先までのルートを再計算しました。"
-            : "現在地を更新しました。受取人は再配達の日付と時間帯を指定できます。",
+            ? "配送一覧から配達済みへ移動し、次の配送先までのルートを再計算しました。"
+            : statusResult.lineNotification === "sent"
+              ? "受取人のLINEへ再配達日時を選ぶ案内を送信し、残りのルートを再計算しました。"
+              : statusResult.lineNotification === "failed"
+                ? "不在は記録しましたが、LINE案内を送信できませんでした。受取人は受取人画面から日時を指定できます。"
+                : "不在を記録しました。LINE未連携のため、受取人画面から再配達日時を指定できます。",
       });
       setLocationMessage(
         `現在地を${currentStop.delivery.address}へ更新しました。`,
@@ -353,6 +389,12 @@ export function DriverDashboard({ runId }: { runId: string }) {
       stop.stopOrder === data.run.currentStopOrder &&
       ["pending", "out_for_delivery"].includes(stop.delivery.status),
   );
+  const demoRouteStops = data.stops
+    .filter((stop) =>
+      ["pending", "out_for_delivery"].includes(stop.delivery.status),
+    )
+    .sort((left, right) => left.stopOrder - right.stopOrder)
+    .slice(0, 6);
 
   return (
     <div className="min-h-screen bg-[#f4f7fb]">
@@ -364,7 +406,7 @@ export function DriverDashboard({ runId }: { runId: string }) {
             </span>
             <div>
               <p className="font-bold leading-tight text-slate-900">
-                スマート配送コンパス
+                スマ配（スマート配送）
               </p>
               <p className="text-[11px] text-slate-400">
                 Driver console · Hiroshima
@@ -426,6 +468,18 @@ export function DriverDashboard({ runId }: { runId: string }) {
           朝8時の自動通知をデモ実行
         </button>
 
+        <details className="mb-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-950">
+          <summary className="cursor-pointer font-bold">
+            デモの見せ方（主役：佐藤 健太さん）
+          </summary>
+          <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-xs leading-5 text-indigo-800">
+            <li>佐藤さんへ「LINEで到着通知」を送る</li>
+            <li>LINEで「10分不在」を押し、田中さんが先になることを示す</li>
+            <li>田中さんの「配達完了」を押し、配達済みへ移ることを示す</li>
+            <li>「ご不在を記録」でLINEへ再配達日時の案内が届くことを示す</li>
+          </ol>
+        </details>
+
         {notice && (
           <div
             className="mb-5 flex items-start justify-between gap-4 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-4 text-teal-950 shadow-sm"
@@ -485,7 +539,7 @@ export function DriverDashboard({ runId }: { runId: string }) {
           <RouteOverview
             provider={data.run.routeProvider}
             revision={data.run.routeRevision}
-            stops={data.stops}
+            stops={demoRouteStops}
           />
         </div>
 
@@ -497,11 +551,11 @@ export function DriverDashboard({ runId }: { runId: string }) {
                   ◫
                 </span>
                 <h2 className="font-bold text-slate-900">
-                  東広島・実道路ルート
+                  デモ経路・次の6件
                 </h2>
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                青線が現在の配送経路、橙色の番号が再配達地点です
+                全120件から直近6件だけを表示。短時間不在で線と順番が変わります
               </p>
             </div>
             <button
@@ -522,7 +576,7 @@ export function DriverDashboard({ runId }: { runId: string }) {
               longitude: data.run.depotLongitude,
             }}
             latestLocation={data.latestLocation}
-            stops={data.stops}
+            stops={demoRouteStops}
           />
         </section>
 

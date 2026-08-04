@@ -1,12 +1,12 @@
 import "server-only";
 
 import { getRunResponse } from "@/lib/data/deliveries";
-import { resolveReattemptWindow } from "@/lib/scheduling/time-slots";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { RouteOptimizationResponse, RouteStop } from "@/types/delivery";
 import { getRoutingProvider, MockRoutingProvider } from "./index";
 import { optimizeRoute } from "./optimize-route";
 import type { Coordinate, RoutingProvider } from "./types";
+import { latestAvailability } from "./availability";
 
 function activeStops(stops: RouteStop[]) {
   return stops.filter((stop) =>
@@ -25,50 +25,6 @@ function planningStart(startedAt: string | null) {
   const now = Date.now();
   const started = startedAt ? new Date(startedAt).getTime() : now;
   return new Date(Math.max(now, started));
-}
-
-async function rollExpiredDeliveryWindows(
-  stops: RouteStop[],
-  deliveryDate: string,
-  startTime: Date,
-) {
-  const expired = stops.filter(
-    (stop) =>
-      stop.delivery.windowEnd &&
-      new Date(stop.delivery.windowEnd).getTime() < startTime.getTime(),
-  );
-  if (expired.length === 0) return;
-
-  const supabase = createSupabaseAdminClient();
-  for (const stop of expired) {
-    const scheduledDate = stop.delivery.windowEnd
-      ? new Intl.DateTimeFormat("en-CA", {
-          timeZone: "Asia/Tokyo",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).format(new Date(stop.delivery.windowEnd))
-      : deliveryDate;
-    const window = resolveReattemptWindow({
-      deliveryDate: scheduledDate,
-      carrier: stop.delivery.carrier,
-      currentWindowCode: stop.delivery.requestedWindowCode,
-      returnAt: startTime,
-    });
-    const result = await supabase.rpc("change_delivery_window", {
-      p_delivery_id: stop.delivery.id,
-      p_expected_version: stop.delivery.version,
-      p_window_code: window.code,
-      p_window_start: window.start.toISOString(),
-      p_window_end: window.end.toISOString(),
-    });
-    if (result.error) throw result.error;
-
-    stop.delivery.requestedWindowCode = window.code;
-    stop.delivery.windowStart = window.start.toISOString();
-    stop.delivery.windowEnd = window.end.toISOString();
-    stop.delivery.version += 1;
-  }
 }
 
 async function withRoutingFallback<T>(
@@ -104,7 +60,6 @@ export async function optimizeDeliveryRun(
   if (stops.length === 0) throw new Error("NO_ACTIVE_DELIVERIES");
 
   const startTime = planningStart(data.run.startedAt);
-  await rollExpiredDeliveryWindows(stops, data.run.deliveryDate, startTime);
 
   const origin: Coordinate = data.latestLocation
     ? {
@@ -126,7 +81,12 @@ export async function optimizeDeliveryRun(
     stops: stops.map((stop) => ({
       id: stop.delivery.id,
       serviceSeconds: stop.delivery.serviceSeconds,
-      availableFrom: stop.delivery.availableFrom,
+      availableFrom: latestAvailability(
+        stop.delivery.availableFrom,
+        stop.delivery.unavailableUntil,
+      ),
+      allowWaiting: !stop.delivery.unavailableUntil,
+      preferredFirst: stop.delivery.status === "out_for_delivery",
       windowStart: stop.delivery.windowStart,
       windowEnd: stop.delivery.windowEnd,
     })),

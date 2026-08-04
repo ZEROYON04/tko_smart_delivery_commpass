@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
+  createAbsentRedeliveryGuideMessage,
+  pushLineMessages,
+} from "@/lib/line/messaging";
+import { createRecipientUrl } from "@/lib/line/recipient-url";
+import {
   deliveryStatusRequestSchema,
   statusResultSchema,
 } from "@/lib/validation/delivery";
@@ -31,6 +36,20 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    const { data: delivery, error: deliveryError } = await supabase
+      .from("deliveries")
+      .select("id,recipient_id,tracking_number")
+      .eq("id", deliveryId)
+      .maybeSingle();
+
+    if (deliveryError) throw deliveryError;
+    if (!delivery) {
+      return NextResponse.json(
+        { message: "荷物が見つかりません。" },
+        { status: 404 },
+      );
+    }
+
     const { data, error } = await supabase.rpc("change_delivery_status", {
       p_delivery_id: deliveryId,
       p_status: parsed.data.status,
@@ -55,7 +74,47 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     }
 
-    return NextResponse.json(statusResultSchema.parse(data));
+    const result = statusResultSchema.parse(data);
+    let lineNotification: "sent" | "skipped" | "failed" = "skipped";
+
+    if (parsed.data.status === "absent") {
+      const { data: recipient, error: recipientError } = await supabase
+        .from("recipient_accounts")
+        .select("line_user_id")
+        .eq("id", delivery.recipient_id)
+        .maybeSingle();
+
+      if (recipientError) {
+        console.error("Failed to find LINE recipient after absence", {
+          deliveryId,
+          error: recipientError,
+        });
+        lineNotification = "failed";
+      } else if (recipient?.line_user_id) {
+        try {
+          await pushLineMessages(recipient.line_user_id, [
+            createAbsentRedeliveryGuideMessage({
+              trackingNumber: delivery.tracking_number,
+              recipientUrl: createRecipientUrl(deliveryId, "redelivery"),
+            }),
+          ]);
+          lineNotification = "sent";
+          await supabase.from("delivery_events").insert({
+            delivery_id: deliveryId,
+            event_type: "line_redelivery_guide_sent",
+            new_value: { sentAt: new Date().toISOString() },
+          });
+        } catch (notificationError) {
+          lineNotification = "failed";
+          console.error("Failed to send LINE redelivery guide", {
+            deliveryId,
+            error: notificationError,
+          });
+        }
+      }
+    }
+
+    return NextResponse.json({ ...result, lineNotification });
   } catch (error) {
     console.error("Failed to change delivery status", { deliveryId, error });
     return NextResponse.json(
