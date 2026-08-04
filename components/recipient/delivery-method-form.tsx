@@ -24,16 +24,20 @@ export function DeliveryMethodForm({
   deliveryId,
   initialData,
   accessQuery,
+  initialView,
 }: {
   deliveryId: string;
   initialData: RecipientDeliveryResponse;
   accessQuery: string;
+  initialView: "overview" | "schedule" | "redelivery";
 }) {
   const [data, setData] = useState<RecipientDeliveryResponse | null>(
     initialData,
   );
   const [updating, setUpdating] = useState<DeliveryMethod | null>(null);
   const [windowUpdating, setWindowUpdating] = useState(false);
+  const [reattemptUpdating, setReattemptUpdating] = useState(false);
+  const [returnInMinutes, setReturnInMinutes] = useState(60);
   const [selectedWindow, setSelectedWindow] = useState(
     initialData.delivery.requestedWindowCode ?? "",
   );
@@ -151,14 +155,18 @@ export function DeliveryMethodForm({
     setError(null);
     setSuccess(null);
     try {
-      const response = await fetch(`/api/deliveries/${deliveryId}/window`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          windowCode: selectedWindow,
-          version: data.delivery.version,
-        }),
-      });
+      const querySuffix = accessQuery ? `?${accessQuery}` : "";
+      const response = await fetch(
+        `/api/deliveries/${deliveryId}/window${querySuffix}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            windowCode: selectedWindow,
+            version: data.delivery.version,
+          }),
+        },
+      );
       const body: unknown = await response.json();
       if (!response.ok) {
         throw new Error(
@@ -179,6 +187,49 @@ export function DeliveryMethodForm({
       );
     } finally {
       setWindowUpdating(false);
+    }
+  }
+
+  async function requestRedelivery() {
+    if (!data || !selectedWindow) return;
+
+    setReattemptUpdating(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const querySuffix = accessQuery ? `?${accessQuery}` : "";
+      const response = await fetch(
+        `/api/deliveries/${deliveryId}/reattempt${querySuffix}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            returnInMinutes,
+            preferredWindowCode: selectedWindow,
+            version: data.delivery.version,
+          }),
+        },
+      );
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof body === "object" && body && "message" in body
+            ? String(body.message)
+            : "再配達を申し込めませんでした。",
+        );
+      }
+      await loadDelivery();
+      setSuccess(
+        "再配達を受け付けました。ドライバーの配送順と到着予定を再計算しました。",
+      );
+    } catch (reattemptError) {
+      setError(
+        reattemptError instanceof Error
+          ? reattemptError.message
+          : "再配達を申し込めませんでした。",
+      );
+    } finally {
+      setReattemptUpdating(false);
     }
   }
 
@@ -218,7 +269,7 @@ export function DeliveryMethodForm({
             </span>
             <div>
               <p className="text-sm font-bold leading-tight text-slate-900">
-                スマート配送コンパス
+                スマ配（スマート配送）
               </p>
               <p className="text-[10px] text-slate-400">受取方法の変更</p>
             </div>
@@ -292,7 +343,60 @@ export function DeliveryMethodForm({
             </p>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          {initialView === "redelivery" && (
+            <div
+              className="mt-4 scroll-mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-4"
+              id="redelivery"
+            >
+              <p className="text-xs font-semibold text-orange-700">
+                再配達のお申し込み
+              </p>
+              {data.delivery.isReattempt ? (
+                <p className="mt-2 text-sm font-bold text-orange-900">
+                  この荷物は再配達ルートに設定済みです。下の欄から時間帯を変更できます。
+                </p>
+              ) : data.delivery.status === "absent" ? (
+                <>
+                  <label className="mt-3 block text-xs font-semibold text-slate-600">
+                    受取可能になる目安
+                    <select
+                      className="mt-1.5 min-h-12 w-full rounded-xl border border-orange-200 bg-white px-3 text-sm font-semibold text-slate-800"
+                      disabled={reattemptUpdating}
+                      onChange={(event) =>
+                        setReturnInMinutes(Number(event.target.value))
+                      }
+                      value={returnInMinutes}
+                    >
+                      {[15, 30, 60, 90, 120, 180].map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {minutes}分後
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="mt-3 min-h-12 w-full rounded-xl bg-orange-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
+                    disabled={reattemptUpdating || !selectedWindow}
+                    onClick={() => void requestRedelivery()}
+                    type="button"
+                  >
+                    {reattemptUpdating
+                      ? "再配達を計算中…"
+                      : "この時間帯で再配達を申し込む"}
+                  </button>
+                </>
+              ) : (
+                <p className="mt-2 text-sm text-orange-900">
+                  この荷物は現在、再配達の対象ではありません。
+                </p>
+              )}
+            </div>
+          )}
+
+          <div
+            className="mt-4 scroll-mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+            id="schedule"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-xs text-slate-500">配送会社・時間帯</p>
@@ -331,6 +435,7 @@ export function DeliveryMethodForm({
                 className="min-h-12 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
                 disabled={
                   windowUpdating ||
+                  reattemptUpdating ||
                   isFinished ||
                   !selectedWindow ||
                   selectedWindow === data.delivery.requestedWindowCode
@@ -371,6 +476,7 @@ export function DeliveryMethodForm({
               disabled={
                 Boolean(updating) ||
                 windowUpdating ||
+                reattemptUpdating ||
                 isFinished ||
                 data.delivery.deliveryMethod === "dropoff"
               }
@@ -392,6 +498,7 @@ export function DeliveryMethodForm({
               disabled={
                 Boolean(updating) ||
                 windowUpdating ||
+                reattemptUpdating ||
                 isFinished ||
                 data.delivery.deliveryMethod === "handoff"
               }

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
-  createDeliveryPlanMenuMessage,
+  createDeliveryDateChangeMenuMessage,
+  createRedeliveryMenuMessage,
   createDeliveryStatusMenuMessage,
   type LineMessage,
   replyLineMessages,
@@ -68,6 +69,47 @@ async function findNextDelivery(lineUserId: string) {
   return nextStop ? (deliveriesById.get(nextStop.delivery_id) ?? null) : null;
 }
 
+async function findRedelivery(lineUserId: string) {
+  const supabase = createSupabaseAdminClient();
+  const { data: recipients, error: recipientError } = await supabase
+    .from("recipient_accounts")
+    .select("id")
+    .eq("line_user_id", lineUserId);
+
+  if (recipientError) throw recipientError;
+  const recipientIds = (recipients ?? []).map((recipient) => recipient.id);
+  if (recipientIds.length === 0) return null;
+
+  const { data, error } = await supabase
+    .from("deliveries")
+    .select("id,tracking_number,status,is_reattempt,last_absent_at")
+    .in("recipient_id", recipientIds)
+    .or("status.eq.absent,is_reattempt.eq.true")
+    .not("status", "in", '("delivered","cancelled")')
+    .order("last_absent_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+function createRecipientUrl(
+  deliveryId: string,
+  view: "overview" | "schedule" | "redelivery",
+) {
+  const publicSiteUrl = (
+    process.env.LINE_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL
+  )?.replace(/\/$/, "");
+  if (!publicSiteUrl)
+    throw new Error("LINE_PUBLIC_SITE_URL is not configured.");
+
+  const accessQuery = createRecipientAccessQuery(deliveryId);
+  accessQuery.set("view", view);
+  const anchor = view === "overview" ? "" : `#${view}`;
+  return `${publicSiteUrl}/recipient/${deliveryId}?${accessQuery}${anchor}`;
+}
+
 async function handleMenuCommand(
   event: LineWebhookEvent,
   command: LineMenuCommand,
@@ -82,11 +124,14 @@ async function handleMenuCommand(
         "💡 スマ配｜使い方",
         "━━━━━━━━━━━━",
         "",
-        "🚚 配達状況",
+        "📦 荷物の確認",
         "　到着目安や配送順を確認できます。",
         "",
-        "🔄 受取予定変更",
-        "　在宅・短時間不在・本日受取不可を連絡できます。",
+        "📅 日時変更",
+        "　初回配達前の時間帯を変更できます。",
+        "",
+        "🔁 再配達",
+        "　不在となった荷物の再配達を申し込めます。",
         "",
         "🔗 初回連携",
         "　「初回連携 お客様コード」と送信してください。",
@@ -96,44 +141,57 @@ async function handleMenuCommand(
     return;
   }
 
-  const delivery = await findNextDelivery(lineUserId);
+  const delivery =
+    command === "redelivery"
+      ? await findRedelivery(lineUserId)
+      : await findNextDelivery(lineUserId);
   if (!delivery) {
     await reply(
       event.replyToken,
-      [
-        "ℹ️ スマ配｜配達予定",
-        "━━━━━━━━━━━━",
-        "現在、確認できる配達予定はありません。",
-        "",
-        "未連携の場合は、",
-        "「初回連携 お客様コード」",
-        "と送信してください。",
-      ].join("\n"),
+      command === "redelivery"
+        ? [
+            "ℹ️ スマ配｜再配達",
+            "━━━━━━━━━━━━",
+            "現在、再配達を申し込める荷物はありません。",
+            "不在となった荷物がある場合に利用できます。",
+          ].join("\n")
+        : [
+            "ℹ️ スマ配｜配達予定",
+            "━━━━━━━━━━━━",
+            "現在、確認できる配達予定はありません。",
+            "",
+            "未連携の場合は、",
+            "「初回連携 お客様コード」",
+            "と送信してください。",
+          ].join("\n"),
     );
     return;
   }
 
-  if (command === "change_plan") {
+  if (command === "change_date") {
     await replyMessages(event.replyToken, [
-      createDeliveryPlanMenuMessage({
-        deliveryId: delivery.id,
+      createDeliveryDateChangeMenuMessage({
         trackingNumber: delivery.tracking_number,
+        recipientUrl: createRecipientUrl(delivery.id, "schedule"),
       }),
     ]);
     return;
   }
 
-  const publicSiteUrl = (
-    process.env.LINE_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL
-  )?.replace(/\/$/, "");
-  if (!publicSiteUrl)
-    throw new Error("LINE_PUBLIC_SITE_URL is not configured.");
-  const accessQuery = createRecipientAccessQuery(delivery.id);
+  if (command === "redelivery") {
+    await replyMessages(event.replyToken, [
+      createRedeliveryMenuMessage({
+        trackingNumber: delivery.tracking_number,
+        recipientUrl: createRecipientUrl(delivery.id, "redelivery"),
+      }),
+    ]);
+    return;
+  }
 
   await replyMessages(event.replyToken, [
     createDeliveryStatusMenuMessage({
       trackingNumber: delivery.tracking_number,
-      recipientUrl: `${publicSiteUrl}/recipient/${delivery.id}?${accessQuery}`,
+      recipientUrl: createRecipientUrl(delivery.id, "overview"),
     }),
   ]);
 }

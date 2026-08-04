@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "demo:start": "node scripts/demo-environment.mjs",
+    "demo:local": "node scripts/demo-environment.mjs --local",
+    "demo:stop": "supabase stop",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

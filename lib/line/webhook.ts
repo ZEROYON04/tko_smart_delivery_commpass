@@ -10,7 +10,8 @@ export type LineWebhookEvent = {
 
 export type LineWebhookBody = { events?: LineWebhookEvent[] };
 
-export type LineMenuCommand = "delivery_status" | "change_plan" | "help";
+export type LineMenuCommand =
+  "delivery_status" | "change_date" | "redelivery" | "help";
 
 export function verifyLineSignature(
   rawBody: string,
@@ -42,11 +43,15 @@ export function extractMenuCommand(
   text: string | undefined,
 ): LineMenuCommand | null {
   switch (text?.trim()) {
+    case "荷物の確認":
     case "配達状況":
       return "delivery_status";
+    case "日時変更":
     case "受取予定変更":
     case "受取予定を変更":
-      return "change_plan";
+      return "change_date";
+    case "再配達":
+      return "redelivery";
     case "使い方":
       return "help";
     default:

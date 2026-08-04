@@ -123,6 +123,31 @@ pnpm exec supabase db reset
 
 ## 日常の起動方法
 
+### まとめて起動する場合（macOS）
+
+Docker Desktopを起動してから、プロジェクトのルートで次の1コマンドを実行します。
+
+```bash
+fnm use 24.18.1
+pnpm demo:start
+```
+
+Supabase、LINE Webhookプロキシ、Cloudflareトンネル、Next.jsが順番に起動します。Cloudflareの一時URLは `.env` の `LINE_PUBLIC_SITE_URL` へ自動反映されます。一時URLが前回と変わった場合は、表示されたWebhook URLをLINE Developersへ設定してください。
+
+LINEからの受信を確認せず、PC内だけで起動する場合は次を使用します。
+
+```bash
+pnpm demo:local
+```
+
+終了するときは、同じターミナルで `Control+C` を押します。Supabaseが残っている場合や、別のターミナルから確実に停止したい場合は次を実行します。
+
+```bash
+pnpm demo:stop
+```
+
+### 個別に起動する場合
+
 Docker Desktopを起動後、WSLで以下を実行します。
 
 ```bash

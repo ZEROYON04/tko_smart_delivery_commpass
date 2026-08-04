@@ -7,11 +7,19 @@ import {
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { reattemptRequestSchema } from "@/lib/validation/delivery";
 import type { Carrier } from "@/types/delivery";
+import { isRecipientRequestAuthorized } from "@/lib/security/recipient-link";
 
 type RouteContext = { params: Promise<{ deliveryId: string }> };
 
 export async function POST(request: Request, context: RouteContext) {
   const { deliveryId } = await context.params;
+  if (!isRecipientRequestAuthorized(request, deliveryId)) {
+    return NextResponse.json(
+      { message: "リンクが無効か、期限切れです。" },
+      { status: 403 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();

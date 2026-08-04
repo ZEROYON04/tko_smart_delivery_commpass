@@ -208,59 +208,61 @@ export function createDeliveryStatusMenuMessage({
   };
 }
 
-export function createDeliveryPlanMenuMessage({
-  deliveryId,
+export function createDeliveryDateChangeMenuMessage({
   trackingNumber,
+  recipientUrl,
 }: {
-  deliveryId: string;
   trackingNumber: string;
+  recipientUrl: string;
 }): LineMessage {
   return {
     type: "text",
     text: [
-      "🔄 スマ配｜受取予定変更",
+      "📅 スマ配｜日時変更",
       "━━━━━━━━━━━━",
       `📦 荷物番号　${trackingNumber}`,
       "",
-      "現在の状況を下のボタンから選んでください。",
+      "初回配達前のお届け時間帯を変更できます。",
     ].join("\n"),
     quickReply: {
       items: [
         {
           type: "action",
           action: {
-            type: "postback",
-            label: "在宅しています",
-            data: new URLSearchParams({
-              action: "available",
-              deliveryId,
-            }).toString(),
-            displayText: "在宅しています",
+            type: "uri",
+            label: "日時を変更する",
+            uri: recipientUrl,
           },
         },
-        ...[10, 30].map((minutes) => ({
-          type: "action" as const,
-          action: {
-            type: "postback" as const,
-            label: `${minutes}分不在`,
-            data: new URLSearchParams({
-              action: "temporarily_unavailable",
-              deliveryId,
-              minutes: String(minutes),
-            }).toString(),
-            displayText: `${minutes}分ほど不在です`,
-          },
-        })),
+      ],
+    },
+  };
+}
+
+export function createRedeliveryMenuMessage({
+  trackingNumber,
+  recipientUrl,
+}: {
+  trackingNumber: string;
+  recipientUrl: string;
+}): LineMessage {
+  return {
+    type: "text",
+    text: [
+      "🔁 スマ配｜再配達",
+      "━━━━━━━━━━━━",
+      `📦 荷物番号　${trackingNumber}`,
+      "",
+      "不在となった荷物の再配達予定を設定できます。",
+    ].join("\n"),
+    quickReply: {
+      items: [
         {
           type: "action",
           action: {
-            type: "postback",
-            label: "今日は受取不可",
-            data: new URLSearchParams({
-              action: "unavailable_today",
-              deliveryId,
-            }).toString(),
-            displayText: "今日は受け取れません",
+            type: "uri",
+            label: "再配達を申し込む",
+            uri: recipientUrl,
           },
         },
       ],
