@@ -6,7 +6,11 @@ import { verifyRecipientAccess } from "@/lib/security/recipient-link";
 
 type RecipientPageProps = {
   params: Promise<{ deliveryId: string }>;
-  searchParams: Promise<{ expires?: string; signature?: string }>;
+  searchParams: Promise<{
+    expires?: string;
+    signature?: string;
+    view?: string;
+  }>;
 };
 
 export default async function RecipientPage({
@@ -47,6 +51,11 @@ export default async function RecipientPage({
       }
       deliveryId={deliveryId}
       initialData={initialData}
+      initialView={
+        query.view === "schedule" || query.view === "redelivery"
+          ? query.view
+          : "overview"
+      }
     />
   );
 }

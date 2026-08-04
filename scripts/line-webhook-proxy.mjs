@@ -22,8 +22,10 @@ function isAllowedPath(pathname, method) {
     return true;
   }
   if (
-    /^\/api\/deliveries\/[0-9a-f-]+\/method$/.test(pathname) &&
-    method === "PATCH"
+    /^\/api\/deliveries\/[0-9a-f-]+\/(method|window|reattempt)$/.test(
+      pathname,
+    ) &&
+    (method === "PATCH" || method === "POST")
   ) {
     return true;
   }

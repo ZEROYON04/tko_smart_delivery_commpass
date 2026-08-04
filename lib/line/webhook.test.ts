@@ -27,9 +27,12 @@ describe("LINE webhook", () => {
   });
 
   it.each([
+    ["荷物の確認", "delivery_status"],
     ["配達状況", "delivery_status"],
-    ["受取予定変更", "change_plan"],
-    ["受取予定を変更", "change_plan"],
+    ["日時変更", "change_date"],
+    ["受取予定変更", "change_date"],
+    ["受取予定を変更", "change_date"],
+    ["再配達", "redelivery"],
     ["使い方", "help"],
     ["自由入力", null],
   ])("extracts the rich-menu command from %s", (text, expected) => {

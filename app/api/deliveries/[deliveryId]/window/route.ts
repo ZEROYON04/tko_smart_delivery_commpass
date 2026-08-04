@@ -6,12 +6,20 @@ import {
 } from "@/lib/scheduling/time-slots";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { deliveryWindowRequestSchema } from "@/lib/validation/delivery";
+import { isRecipientRequestAuthorized } from "@/lib/security/recipient-link";
 import type { Carrier } from "@/types/delivery";
 
 type RouteContext = { params: Promise<{ deliveryId: string }> };
 
 export async function PATCH(request: Request, context: RouteContext) {
   const { deliveryId } = await context.params;
+  if (!isRecipientRequestAuthorized(request, deliveryId)) {
+    return NextResponse.json(
+      { message: "リンクが無効か、期限切れです。" },
+      { status: 403 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
