@@ -4,7 +4,7 @@
 
 受取人が「対面受取」から「置き配」へ変更すると、Supabase Realtimeを通じてドライバー画面へ反映されます。通常の受取方法変更では配送順を固定したまま、短縮された滞在時間を使って後続地点の到着予定時刻（ETA）だけを前倒しします。不在・時間帯変更時だけ、在宅予定と配送枠を守るように残りの配送順を再最適化します。
 
-> このリポジトリはモック環境です。地図表示にはGoogle Maps、道路経路にはOpenStreetMapデータを利用するOSRMの公開デモサービスを使用します。LINE Messaging APIは公式アカウントと接続して動作確認できますが、配送会社システム、ドライバー認証、Amazon Location Serviceには接続していません。
+> このリポジトリはモック環境です。地図表示にはMapLibre GLとOpenStreetMap、道路経路にはOpenStreetMapデータを利用するOSRMの公開デモサービスを使用します。LINE Messaging APIは公式アカウントと接続して動作確認できますが、配送会社システム、ドライバー認証、Amazon Location Serviceには接続していません。
 
 ## 技術スタック
 
@@ -12,7 +12,7 @@
 - React 19.2.4 / TypeScript
 - Tailwind CSS v4
 - Supabase PostgreSQL / Realtime / CLI
-- Google Maps JavaScript API
+- MapLibre GL / OpenStreetMap
 - OSRM（道路経路・時間行列）
 - Zod
 - Vitest
@@ -106,12 +106,12 @@ SUPABASE_SERVICE_ROLE_KEY=<Secret Key>
 
 NEXT_PUBLIC_DEMO_RUN_ID=00000000-0000-4000-8000-000000000001
 NEXT_PUBLIC_DEMO_DELIVERY_ID=00000000-0000-4000-8000-000000000103
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<Google Maps API Key>
+NEXT_PUBLIC_MAP_TILE_URL=https://tile.openstreetmap.org/{z}/{x}/{y}.png
 ROUTING_PROVIDER=osrm
 OSRM_BASE_URL=https://router.project-osrm.org
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY`には絶対に `NEXT_PUBLIC_` を付けないでください。また、`.env` はGitへコミットしないでください。Google Maps APIキーにはHTTPリファラー制限とMaps JavaScript APIのAPI制限を設定してください。
+`SUPABASE_SERVICE_ROLE_KEY`には絶対に `NEXT_PUBLIC_` を付けないでください。また、`.env` はGitへコミットしないでください。公開OpenStreetMapタイルは動作確認用とし、本番では利用規約と負荷要件に合うタイルプロバイダーへ差し替えてください。
 
 ### 4. DBの初期化
 
@@ -272,9 +272,9 @@ wsl --shutdown
 1. 全配送先の走行時間・道路距離行列を取得
 2. 在宅可能時刻と会社別配送枠を満たす順序を探索
 3. 選ばれた順序の道路形状をGeoJSON相当の座標列として保存
-4. Google Mapsで道路経路、拠点、配送先、ドライバー位置を表示
+4. MapLibre GLとOpenStreetMapで道路経路、拠点、配送先、ドライバー位置を表示
 
-OSRMへ接続できない場合は、自動的に `MockRoutingProvider` へフォールバックします。公開OSRMにはSLAがないため、本番運用ではセルフホストまたはAmazon Location Service等へ差し替えてください。地図表示には、請求とHTTPリファラー制限を設定したGoogle Maps APIキーが必要です。
+OSRMへ接続できない場合は、自動的に `MockRoutingProvider` へフォールバックします。公開OSRMにはSLAがないため、本番運用ではセルフホストまたはAmazon Location Service等へ差し替えてください。地図タイルも本番運用では専用プロバイダーまたはセルフホストへ差し替えてください。
 
 ## 会社別の配達時間帯
 
@@ -302,7 +302,7 @@ LINE Messaging APIのPush・Reply・Webhookを実装済みです。現在は当�
 
 - 配達直前通知のスケジュール自動実行
 - LINE連携解除・お客様コード再発行の運用画面
-- Amazon Location Service / Google Mapsの本番向け契約・課金・APIキー制限
+- Amazon Location Serviceや商用地図タイルの本番向け契約・運用設計
 - 本番用ドライバー認証・受取人認証
 - 交通渋滞、通行止め、車種制限を含むリアルタイム交通情報
 - 配送会社APIから取得する本番の荷物・時間帯データ
