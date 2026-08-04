@@ -28,9 +28,6 @@ export function DriverDashboard({ runId }: { runId: string }) {
   const [routeUpdating, setRouteUpdating] = useState(false);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [deliveryDateInput, setDeliveryDateInput] = useState<string | null>(
-    null,
-  );
   const dataRef = useRef<RunResponse | null>(null);
   const initialRouteRefreshAttempted = useRef(false);
 
@@ -167,7 +164,9 @@ export function DriverDashboard({ runId }: { runId: string }) {
     return () => window.clearTimeout(refreshTimer);
   }, [data, optimizeCurrentRoute]);
 
-  async function updateStatus(status: Extract<DeliveryStatus, "delivered">) {
+  async function updateStatus(
+    status: Extract<DeliveryStatus, "delivered" | "absent">,
+  ) {
     const currentStop = data?.stops.find(
       (stop) => stop.stopOrder === data.run.currentStopOrder,
     );
@@ -201,7 +200,10 @@ export function DriverDashboard({ runId }: { runId: string }) {
           status === "delivered"
             ? "配達を完了しました。"
             : "ご不在として記録しました。",
-        body: "次の配送先へ進みます。配送順は維持されています。",
+        body:
+          status === "delivered"
+            ? "次の配送先へ進みます。配送順は維持されています。"
+            : "受取人画面から再配達の日付と時間帯を指定できます。次の配送先へ進みます。",
       });
       await loadData();
     } catch (updateError) {
@@ -263,97 +265,6 @@ export function DriverDashboard({ runId }: { runId: string }) {
         methodError instanceof Error
           ? methodError.message
           : "受取方法を更新できませんでした。",
-      );
-    } finally {
-      setUpdating(false);
-    }
-  }
-
-  async function updateDeliveryDate() {
-    const nextDate = deliveryDateInput ?? data?.run.deliveryDate;
-    if (!data || !nextDate || nextDate === data.run.deliveryDate) return;
-
-    setRouteUpdating(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/runs/${runId}/date`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deliveryDate: nextDate }),
-      });
-      const body: unknown = await response.json();
-      if (!response.ok) {
-        throw new Error(
-          typeof body === "object" && body && "message" in body
-            ? String(body.message)
-            : "配送日を変更できませんでした。",
-        );
-      }
-
-      setDeliveryDateInput(null);
-      setNotice({
-        title: `配送日を${formatDeliveryDate(nextDate)}へ変更しました。`,
-        body: "会社別の時間枠、残りの配送順、道路経路、ETAを新しい日付で再計算しました。",
-      });
-      await loadData();
-    } catch (dateError) {
-      setError(
-        dateError instanceof Error
-          ? dateError.message
-          : "配送日を変更できませんでした。",
-      );
-    } finally {
-      setRouteUpdating(false);
-    }
-  }
-
-  async function scheduleReattempt(input: {
-    returnInMinutes: number;
-    preferredWindowCode: string | null;
-  }) {
-    const currentStop = data?.stops.find(
-      (stop) => stop.stopOrder === data.run.currentStopOrder,
-    );
-    if (!currentStop) return;
-
-    setUpdating(true);
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/deliveries/${currentStop.delivery.id}/reattempt`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...input,
-            version: currentStop.delivery.version,
-          }),
-        },
-      );
-      const body: unknown = await response.json();
-      if (!response.ok) {
-        throw new Error(
-          typeof body === "object" && body && "message" in body
-            ? String(body.message)
-            : "再配達を設定できませんでした。",
-        );
-      }
-      const result = body as {
-        window: { label: string; movedToNextDay: boolean };
-        optimization: { provider: string; usedFallback: boolean };
-      };
-      setNotice({
-        title: `不在を記録し、${result.window.label}の再配達へ組み込みました。`,
-        body: result.window.movedToNextDay
-          ? "本日の枠に収まらないため、翌日の最初の枠へ再配置しました。"
-          : "在宅予定と道路所要時間を基に、残りの配送順とETAを再計算しました。",
-      });
-      await loadData();
-    } catch (reattemptError) {
-      setError(
-        reattemptError instanceof Error
-          ? reattemptError.message
-          : "再配達を設定できませんでした。",
       );
     } finally {
       setUpdating(false);
@@ -502,39 +413,9 @@ export function DriverDashboard({ runId }: { runId: string }) {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge kind="run" value={data.run.status} />
-              <form
-                className="flex flex-wrap items-center gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void updateDeliveryDate();
-                }}
-              >
-                <label className="sr-only" htmlFor="delivery-date">
-                  配送日
-                </label>
-                <input
-                  className="min-h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm"
-                  disabled={routeUpdating || updating}
-                  id="delivery-date"
-                  onInput={(event) =>
-                    setDeliveryDateInput(event.currentTarget.value)
-                  }
-                  type="date"
-                  value={deliveryDateInput ?? data.run.deliveryDate}
-                />
-                <button
-                  className="min-h-9 rounded-xl bg-slate-900 px-3 text-xs font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={
-                    routeUpdating ||
-                    updating ||
-                    !deliveryDateInput ||
-                    deliveryDateInput === data.run.deliveryDate
-                  }
-                  type="submit"
-                >
-                  {routeUpdating ? "再計算中…" : "配送日を変更"}
-                </button>
-              </form>
+              <span className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
+                配送日：{formatDeliveryDate(data.run.deliveryDate)}
+              </span>
             </div>
             <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
               おはようございます、{data.run.driverName}
@@ -628,7 +509,6 @@ export function DriverDashboard({ runId }: { runId: string }) {
             updating={updating}
             onMethodChange={(input) => void updateDeliveryMethod(input)}
             onStatusChange={(status) => void updateStatus(status)}
-            onReattempt={(input) => void scheduleReattempt(input)}
           />
           <RouteOverview
             provider={data.run.routeProvider}

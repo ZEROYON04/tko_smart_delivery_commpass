@@ -92,6 +92,7 @@ export type RecipientDeliveryResponse = {
   delivery: Delivery;
   stop: Pick<RouteStop, "stopId" | "stopOrder" | "estimatedArrival" | "locked">;
   driverName: string;
+  deliveryDate: string;
 };
 
 export type RouteOptimizationResponse = {

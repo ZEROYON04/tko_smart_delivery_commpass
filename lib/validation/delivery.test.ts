@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   deliveryDateRequestSchema,
   deliveryMethodRequestSchema,
+  deliveryWindowRequestSchema,
+  reattemptRequestSchema,
 } from "./delivery";
 
 describe("delivery method validation", () => {
@@ -38,6 +40,27 @@ describe("delivery date validation", () => {
     expect(
       deliveryDateRequestSchema.safeParse({ deliveryDate: "2026-02-30" })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe("recipient delivery schedule validation", () => {
+  it("accepts an exact redelivery date and time slot", () => {
+    expect(
+      reattemptRequestSchema.safeParse({
+        deliveryDate: "2026-08-06",
+        windowCode: "14-16",
+        version: 3,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("requires a date when changing the delivery window", () => {
+    expect(
+      deliveryWindowRequestSchema.safeParse({
+        windowCode: "14-16",
+        version: 3,
+      }).success,
     ).toBe(false);
   });
 });

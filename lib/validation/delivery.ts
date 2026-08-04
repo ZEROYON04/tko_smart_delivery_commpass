@@ -15,17 +15,18 @@ export const deliveryMethodRequestSchema = z.object({
   version: z.number().int().positive(),
 });
 
+const deliveryDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00Z`);
+    return (
+      !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value)
+    );
+  });
+
 export const deliveryDateRequestSchema = z.object({
-  deliveryDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .refine((value) => {
-      const parsed = new Date(`${value}T00:00:00Z`);
-      return (
-        !Number.isNaN(parsed.getTime()) &&
-        parsed.toISOString().startsWith(value)
-      );
-    }),
+  deliveryDate: deliveryDateSchema,
 });
 
 export const deliveryStatusRequestSchema = z.object({
@@ -45,16 +46,13 @@ export const locationRequestSchema = z.object({
 });
 
 export const reattemptRequestSchema = z.object({
-  returnInMinutes: z
-    .number()
-    .int()
-    .min(5)
-    .max(24 * 60),
-  preferredWindowCode: z.string().min(1).max(20).nullable().optional(),
+  deliveryDate: deliveryDateSchema,
+  windowCode: z.string().min(1).max(20),
   version: z.number().int().positive(),
 });
 
 export const deliveryWindowRequestSchema = z.object({
+  deliveryDate: deliveryDateSchema,
   windowCode: z.string().min(1).max(20),
   version: z.number().int().positive(),
 });

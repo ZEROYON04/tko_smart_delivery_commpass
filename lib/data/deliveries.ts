@@ -135,6 +135,15 @@ function mapDelivery(row: DeliveryRow, lineLinked = false): Delivery {
   };
 }
 
+function formatJstDate(value: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(value));
+}
+
 export async function getRunResponse(
   runId: string,
 ): Promise<RunResponse | null> {
@@ -279,7 +288,7 @@ export async function getRecipientDelivery(
       .maybeSingle(),
     supabase
       .from("delivery_runs")
-      .select("driver_name")
+      .select("driver_name,delivery_date")
       .eq("id", deliveryRow.run_id)
       .maybeSingle(),
     supabase
@@ -314,5 +323,9 @@ export async function getRecipientDelivery(
       locked: stop.locked,
     },
     driverName: (runResult.data as { driver_name: string }).driver_name,
+    deliveryDate: deliveryRow.window_start
+      ? formatJstDate(deliveryRow.window_start)
+      : (runResult.data as { driver_name: string; delivery_date: string })
+          .delivery_date,
   };
 }

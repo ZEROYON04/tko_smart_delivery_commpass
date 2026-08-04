@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { optimizeDeliveryRun } from "@/lib/routing/optimize-run";
 import {
   getTimeSlot,
-  resolveReattemptWindow,
+  resolveRequestedDeliveryWindow,
 } from "@/lib/scheduling/time-slots";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { reattemptRequestSchema } from "@/lib/validation/delivery";
@@ -33,7 +33,7 @@ export async function POST(request: Request, context: RouteContext) {
   const parsed = reattemptRequestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { message: "戻り予定と時間帯を確認してください。" },
+      { message: "再配達の日付と時間帯を確認してください。" },
       { status: 400 },
     );
   }
@@ -42,7 +42,7 @@ export async function POST(request: Request, context: RouteContext) {
     const supabase = createSupabaseAdminClient();
     const deliveryResult = await supabase
       .from("deliveries")
-      .select("run_id,carrier,requested_window_code")
+      .select("run_id,carrier,status,is_reattempt")
       .eq("id", deliveryId)
       .maybeSingle();
     if (deliveryResult.error) throw deliveryResult.error;
@@ -53,32 +53,43 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const runResult = await supabase
-      .from("delivery_runs")
-      .select("delivery_date")
-      .eq("id", deliveryResult.data.run_id)
-      .single();
-    if (runResult.error) throw runResult.error;
+    if (
+      deliveryResult.data.status !== "absent" &&
+      !deliveryResult.data.is_reattempt
+    ) {
+      return NextResponse.json(
+        { message: "不在登録後に再配達日時を指定できます。" },
+        { status: 409 },
+      );
+    }
 
     const carrier = deliveryResult.data.carrier as Carrier;
-    const preferred = parsed.data.preferredWindowCode ?? null;
-    if (preferred && !getTimeSlot(carrier, preferred)) {
+    if (!getTimeSlot(carrier, parsed.data.windowCode)) {
       return NextResponse.json(
         { message: "この配送会社では選択できない時間帯です。" },
         { status: 400 },
       );
     }
 
-    const returnAt = new Date(
-      Date.now() + parsed.data.returnInMinutes * 60_000,
-    );
-    const window = resolveReattemptWindow({
-      deliveryDate: runResult.data.delivery_date,
-      carrier,
-      currentWindowCode: deliveryResult.data.requested_window_code,
-      preferredWindowCode: preferred,
-      returnAt,
-    });
+    let window;
+    try {
+      window = resolveRequestedDeliveryWindow({
+        deliveryDate: parsed.data.deliveryDate,
+        carrier,
+        windowCode: parsed.data.windowCode,
+      });
+    } catch (windowError) {
+      if (
+        windowError instanceof Error &&
+        windowError.message === "PAST_DELIVERY_WINDOW"
+      ) {
+        return NextResponse.json(
+          { message: "過去の日時は指定できません。" },
+          { status: 400 },
+        );
+      }
+      throw windowError;
+    }
     const scheduleResult = await supabase.rpc("schedule_delivery_reattempt", {
       p_delivery_id: deliveryId,
       p_expected_version: parsed.data.version,
@@ -102,7 +113,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const optimization = await optimizeDeliveryRun(
       deliveryResult.data.run_id,
-      `reattempt:${deliveryId}:${window.code}`,
+      `reattempt:${deliveryId}:${window.deliveryDate}:${window.code}`,
     );
     return NextResponse.json({
       schedule: scheduleResult.data,
@@ -112,7 +123,7 @@ export async function POST(request: Request, context: RouteContext) {
         start: window.start.toISOString(),
         end: window.end.toISOString(),
         availableFrom: window.availableFrom.toISOString(),
-        movedToNextDay: window.movedToNextDay,
+        deliveryDate: window.deliveryDate,
       },
       optimization,
     });
