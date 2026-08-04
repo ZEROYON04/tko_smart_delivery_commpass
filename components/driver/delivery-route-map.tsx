@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type {
+  GeoJSONSource,
+  Map as MapLibreMap,
+  Marker as MapLibreMarker,
+  StyleSpecification,
+} from "maplibre-gl";
 import type { DriverLocation, RouteStop } from "@/types/delivery";
 
 type DeliveryRouteMapProps = {
@@ -9,142 +15,62 @@ type DeliveryRouteMapProps = {
   latestLocation: DriverLocation | null;
 };
 
-type GoogleMapsLatLng = {
-  lat: number;
-  lng: number;
+type MapLibreModule = typeof import("maplibre-gl");
+
+type StopMarkerState = {
+  element: HTMLDivElement;
+  marker: MapLibreMarker;
 };
-
-type GoogleMapsMapInstance = {
-  fitBounds(bounds: GoogleMapsBoundsInstance, padding: number): void;
-};
-
-type GoogleMapsBoundsInstance = {
-  extend(point: GoogleMapsLatLng): void;
-};
-
-type GoogleMapsEventListenerInstance = {
-  remove(): void;
-};
-
-type GoogleMapsOverlayInstance = {
-  setMap(map: GoogleMapsMapInstance | null): void;
-};
-
-type GoogleMapsMarkerInstance = GoogleMapsOverlayInstance & {
-  addListener(
-    eventName: string,
-    handler: () => void,
-  ): GoogleMapsEventListenerInstance;
-  setLabel(label: {
-    text: string;
-    color?: string;
-    fontWeight?: string;
-    fontSize?: string;
-  }): void;
-  setPosition(position: GoogleMapsLatLng): void;
-  setTitle(title: string): void;
-};
-
-type GoogleMapsInfoWindowInstance = {
-  close(): void;
-  setContent(content: Element): void;
-  open(options: {
-    map: GoogleMapsMapInstance;
-    anchor: GoogleMapsMarkerInstance;
-  }): void;
-};
-
-type GoogleMapsPolylineInstance = GoogleMapsOverlayInstance & {
-  setPath(path: GoogleMapsLatLng[]): void;
-};
-
-type GoogleMapsMapsApi = {
-  Map: new (
-    container: Element,
-    options: {
-      center: GoogleMapsLatLng;
-      zoom: number;
-      mapTypeControl: boolean;
-      streetViewControl: boolean;
-      fullscreenControl: boolean;
-    },
-  ) => GoogleMapsMapInstance;
-  Marker: new (options: {
-    position: GoogleMapsLatLng;
-    map: GoogleMapsMapInstance;
-    title?: string;
-    label?: {
-      text: string;
-      color?: string;
-      fontWeight?: string;
-      fontSize?: string;
-    };
-  }) => GoogleMapsMarkerInstance;
-  Polyline: new (options: {
-    path: GoogleMapsLatLng[];
-    geodesic: boolean;
-    strokeColor: string;
-    strokeOpacity: number;
-    strokeWeight: number;
-    map: GoogleMapsMapInstance;
-  }) => GoogleMapsPolylineInstance;
-  InfoWindow: new () => GoogleMapsInfoWindowInstance;
-  LatLngBounds: new () => GoogleMapsBoundsInstance;
-};
-
-type GoogleMapsWindow = Window &
-  typeof globalThis & {
-    google?: {
-      maps: GoogleMapsMapsApi;
-    };
-    __googleMapsScriptPromise?: Promise<void>;
-  };
-
-const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 type RenderedMapState = {
-  depotMarker: GoogleMapsMarkerInstance | null;
-  driverMarker: GoogleMapsMarkerInstance | null;
-  infoWindow: GoogleMapsInfoWindowInstance;
-  route: GoogleMapsPolylineInstance | null;
-  stopMarkers: Map<
-    string,
-    {
-      listener: GoogleMapsEventListenerInstance;
-      marker: GoogleMapsMarkerInstance;
-    }
-  >;
+  depotMarker: MapLibreMarker | null;
+  driverMarker: MapLibreMarker | null;
+  stopMarkers: Map<string, StopMarkerState>;
 };
 
-function loadGoogleMaps(): Promise<void> {
-  const googleWindow = window as GoogleMapsWindow;
+const TILE_URL =
+  process.env.NEXT_PUBLIC_MAP_TILE_URL ??
+  "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
-  if (googleWindow.google?.maps) {
-    return Promise.resolve();
-  }
+const ROUTE_SOURCE_ID = "delivery-route";
+const ROUTE_SHADOW_LAYER_ID = "delivery-route-shadow";
+const ROUTE_LINE_LAYER_ID = "delivery-route-line";
 
-  if (googleWindow.__googleMapsScriptPromise) {
-    return googleWindow.__googleMapsScriptPromise;
-  }
-
-  googleWindow.__googleMapsScriptPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY ?? ""}`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => {
-      googleWindow.__googleMapsScriptPromise = undefined;
-      script.remove();
-      reject(new Error("Google Maps API の読み込みに失敗しました。"));
-    };
-    document.head.appendChild(script);
-  });
-
-  return googleWindow.__googleMapsScriptPromise;
+function createMapStyle(): StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      osm: {
+        type: "raster",
+        tiles: [TILE_URL],
+        tileSize: 256,
+        attribution: "© OpenStreetMap contributors",
+      },
+    },
+    layers: [{ id: "osm", type: "raster", source: "osm" }],
+  };
 }
 
-function createStopInfoContent(stop: RouteStop) {
+function createRouteData(coordinates: [number, number][]) {
+  return {
+    type: "FeatureCollection" as const,
+    features:
+      coordinates.length >= 2
+        ? [
+            {
+              type: "Feature" as const,
+              properties: {},
+              geometry: {
+                type: "LineString" as const,
+                coordinates,
+              },
+            },
+          ]
+        : [],
+  };
+}
+
+function createStopPopupContent(stop: RouteStop) {
   const content = document.createElement("div");
   content.style.maxWidth = "220px";
   content.style.lineHeight = "1.4";
@@ -160,16 +86,25 @@ function createStopInfoContent(stop: RouteStop) {
   return content;
 }
 
+function updateStopMarkerElement(element: HTMLDivElement, stop: RouteStop) {
+  element.className = `route-map-marker ${
+    stop.delivery.isReattempt
+      ? "route-map-marker-reattempt"
+      : stop.delivery.status === "delivered"
+        ? "route-map-marker-delivered"
+        : ""
+  }`;
+  element.textContent = String(stop.stopOrder);
+  element.title = `${stop.stopOrder}. ${stop.delivery.address}`;
+}
+
 function clearRenderedMap(state: RenderedMapState | null) {
   if (!state) return;
 
-  state.infoWindow.close();
-  state.route?.setMap(null);
-  state.depotMarker?.setMap(null);
-  state.driverMarker?.setMap(null);
-  for (const { listener, marker } of state.stopMarkers.values()) {
-    listener.remove();
-    marker.setMap(null);
+  state.depotMarker?.remove();
+  state.driverMarker?.remove();
+  for (const { marker } of state.stopMarkers.values()) {
+    marker.remove();
   }
   state.stopMarkers.clear();
 }
@@ -180,9 +115,9 @@ export function DeliveryRouteMap({
   latestLocation,
 }: DeliveryRouteMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const googleMapsRef = useRef<GoogleMapsMapsApi | null>(null);
   const initialDepotRef = useRef(depot);
-  const mapRef = useRef<GoogleMapsMapInstance | null>(null);
+  const mapLibreRef = useRef<MapLibreModule | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
   const renderedMapRef = useRef<RenderedMapState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mapGeneration, setMapGeneration] = useState(0);
@@ -191,44 +126,38 @@ export function DeliveryRouteMap({
   useEffect(() => {
     if (!containerRef.current) return;
     let cancelled = false;
-    let initializedMap: GoogleMapsMapInstance | null = null;
+    let initializedMap: MapLibreMap | null = null;
 
     async function initializeMap() {
       try {
-        if (!GOOGLE_MAPS_API_KEY) {
-          throw new Error("Google Maps API キーが未設定です。");
-        }
-
-        await loadGoogleMaps();
+        const maplibregl = await import("maplibre-gl");
         if (cancelled || !containerRef.current) return;
 
-        const googleMaps = (window as GoogleMapsWindow).google?.maps;
-        if (!googleMaps) {
-          throw new Error("Google Maps API が利用できません。");
-        }
-
         const initialDepot = initialDepotRef.current;
-        const map = new googleMaps.Map(containerRef.current, {
-          center: {
-            lat: initialDepot.latitude,
-            lng: initialDepot.longitude,
-          },
+        const map = new maplibregl.Map({
+          container: containerRef.current,
+          style: createMapStyle(),
+          center: [initialDepot.longitude, initialDepot.latitude],
           zoom: 11,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: false,
+          attributionControl: { compact: false },
         });
         initializedMap = map;
         mapRef.current = map;
-        googleMapsRef.current = googleMaps;
+        mapLibreRef.current = maplibregl;
         renderedMapRef.current = {
           depotMarker: null,
           driverMarker: null,
-          infoWindow: new googleMaps.InfoWindow(),
-          route: null,
           stopMarkers: new Map(),
         };
-        setMapGeneration((generation) => generation + 1);
+        map.addControl(new maplibregl.NavigationControl(), "top-right");
+        map.once("load", () => {
+          if (!cancelled) {
+            setMapGeneration((generation) => generation + 1);
+          }
+        });
+        map.on("error", (event) => {
+          console.warn("OpenStreetMap tile or MapLibre error", event.error);
+        });
       } catch (mapError) {
         console.error("Failed to render delivery map", mapError);
         if (!cancelled) {
@@ -245,144 +174,141 @@ export function DeliveryRouteMap({
       if (mapRef.current === initializedMap) {
         clearRenderedMap(renderedMapRef.current);
         renderedMapRef.current = null;
-        googleMapsRef.current = null;
+        mapLibreRef.current = null;
         mapRef.current = null;
+        initializedMap?.remove();
       }
     };
   }, [retryAttempt]);
 
   useEffect(() => {
-    const googleMaps = googleMapsRef.current;
+    const maplibregl = mapLibreRef.current;
     const map = mapRef.current;
     const rendered = renderedMapRef.current;
-    if (!googleMaps || !map || !rendered) return;
+    if (!maplibregl || !map || !rendered || !map.isStyleLoaded()) return;
 
-    const routePath = stops
+    const routeCoordinates = stops
       .flatMap((stop, index) =>
         stop.geometry.map(({ longitude, latitude }, pointIndex) =>
           index > 0 && pointIndex === 0
             ? null
-            : { lat: latitude, lng: longitude },
+            : ([longitude, latitude] as [number, number]),
         ),
       )
-      .filter((point): point is GoogleMapsLatLng => point !== null);
+      .filter((point): point is [number, number] => point !== null);
+    const routeData = createRouteData(routeCoordinates);
+    const existingRouteSource = map.getSource(ROUTE_SOURCE_ID) as
+      GeoJSONSource | undefined;
 
-    if (routePath.length >= 2) {
-      if (rendered.route) {
-        rendered.route.setPath(routePath);
-        rendered.route.setMap(map);
-      } else {
-        rendered.route = new googleMaps.Polyline({
-          path: routePath,
-          geodesic: false,
-          strokeColor: "#2563eb",
-          strokeOpacity: 0.92,
-          strokeWeight: 5,
-          map,
-        });
-      }
-    } else if (rendered.route) {
-      rendered.route.setMap(null);
-      rendered.route = null;
+    if (existingRouteSource) {
+      existingRouteSource.setData(routeData);
+    } else {
+      map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data: routeData });
+      map.addLayer({
+        id: ROUTE_SHADOW_LAYER_ID,
+        type: "line",
+        source: ROUTE_SOURCE_ID,
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": 8,
+          "line-opacity": 0.85,
+        },
+      });
+      map.addLayer({
+        id: ROUTE_LINE_LAYER_ID,
+        type: "line",
+        source: ROUTE_SOURCE_ID,
+        paint: {
+          "line-color": "#2563eb",
+          "line-width": 5,
+          "line-opacity": 0.92,
+        },
+      });
     }
 
-    const depotPosition = { lat: depot.latitude, lng: depot.longitude };
+    const depotPosition: [number, number] = [depot.longitude, depot.latitude];
     if (rendered.depotMarker) {
-      rendered.depotMarker.setPosition(depotPosition);
-      rendered.depotMarker.setTitle(depot.name);
-      rendered.depotMarker.setMap(map);
+      rendered.depotMarker.setLngLat(depotPosition);
+      rendered.depotMarker.getElement().title = depot.name;
     } else {
-      rendered.depotMarker = new googleMaps.Marker({
-        position: depotPosition,
-        map,
-        title: depot.name,
-        label: { text: "拠", color: "#ffffff", fontWeight: "700" },
-      });
+      const element = document.createElement("div");
+      element.className = "route-map-marker route-map-marker-depot";
+      element.textContent = "拠";
+      element.title = depot.name;
+      rendered.depotMarker = new maplibregl.Marker({ element })
+        .setLngLat(depotPosition)
+        .addTo(map);
     }
 
     const activeStopIds = new Set<string>();
     for (const stop of stops) {
       activeStopIds.add(stop.stopId);
-      const position = {
-        lat: stop.delivery.latitude,
-        lng: stop.delivery.longitude,
-      };
-      const title = `${stop.stopOrder}. ${stop.delivery.address}`;
-      const label = {
-        text: String(stop.stopOrder),
-        color: "#ffffff",
-        fontWeight: "700",
-      };
+      const position: [number, number] = [
+        stop.delivery.longitude,
+        stop.delivery.latitude,
+      ];
       const existing = rendered.stopMarkers.get(stop.stopId);
 
       if (existing) {
-        existing.listener.remove();
-        existing.marker.setPosition(position);
-        existing.marker.setTitle(title);
-        existing.marker.setLabel(label);
-        existing.marker.setMap(map);
-        existing.listener = existing.marker.addListener("click", () => {
-          rendered.infoWindow.setContent(createStopInfoContent(stop));
-          rendered.infoWindow.open({ map, anchor: existing.marker });
-        });
+        updateStopMarkerElement(existing.element, stop);
+        existing.marker
+          .setLngLat(position)
+          .setPopup(
+            new maplibregl.Popup({ offset: 24 }).setDOMContent(
+              createStopPopupContent(stop),
+            ),
+          );
       } else {
-        const marker = new googleMaps.Marker({
-          position,
-          map,
-          title,
-          label,
-        });
-        const listener = marker.addListener("click", () => {
-          rendered.infoWindow.setContent(createStopInfoContent(stop));
-          rendered.infoWindow.open({ map, anchor: marker });
-        });
-        rendered.stopMarkers.set(stop.stopId, { listener, marker });
+        const element = document.createElement("div");
+        updateStopMarkerElement(element, stop);
+        const marker = new maplibregl.Marker({ element })
+          .setLngLat(position)
+          .setPopup(
+            new maplibregl.Popup({ offset: 24 }).setDOMContent(
+              createStopPopupContent(stop),
+            ),
+          )
+          .addTo(map);
+        rendered.stopMarkers.set(stop.stopId, { element, marker });
       }
     }
 
     for (const [stopId, entry] of rendered.stopMarkers) {
       if (activeStopIds.has(stopId)) continue;
-      entry.listener.remove();
-      entry.marker.setMap(null);
+      entry.marker.remove();
       rendered.stopMarkers.delete(stopId);
     }
 
     if (latestLocation) {
-      const position = {
-        lat: latestLocation.latitude,
-        lng: latestLocation.longitude,
-      };
+      const position: [number, number] = [
+        latestLocation.longitude,
+        latestLocation.latitude,
+      ];
       if (rendered.driverMarker) {
-        rendered.driverMarker.setPosition(position);
-        rendered.driverMarker.setMap(map);
+        rendered.driverMarker.setLngLat(position);
       } else {
-        rendered.driverMarker = new googleMaps.Marker({
-          position,
-          map,
-          title: "ドライバーの最新位置",
-          label: { text: "🚚", fontSize: "18px" },
-        });
+        const element = document.createElement("div");
+        element.className = "route-map-driver";
+        element.textContent = "🚚";
+        element.title = "ドライバーの最新位置";
+        rendered.driverMarker = new maplibregl.Marker({ element })
+          .setLngLat(position)
+          .addTo(map);
       }
     } else if (rendered.driverMarker) {
-      rendered.driverMarker.setMap(null);
+      rendered.driverMarker.remove();
       rendered.driverMarker = null;
     }
 
-    const bounds = new googleMaps.LatLngBounds();
-    bounds.extend(depotPosition);
+    const bounds = new maplibregl.LngLatBounds(depotPosition, depotPosition);
     for (const stop of stops) {
-      bounds.extend({
-        lat: stop.delivery.latitude,
-        lng: stop.delivery.longitude,
-      });
+      bounds.extend([stop.delivery.longitude, stop.delivery.latitude]);
     }
     if (latestLocation) {
-      bounds.extend({
-        lat: latestLocation.latitude,
-        lng: latestLocation.longitude,
-      });
+      bounds.extend([latestLocation.longitude, latestLocation.latitude]);
     }
-    map.fitBounds(bounds, 54);
+    map.resize();
+    map.fitBounds(bounds, { padding: 54, maxZoom: 14, duration: 0 });
   }, [
     depot.latitude,
     depot.longitude,
@@ -396,18 +322,16 @@ export function DeliveryRouteMap({
     return (
       <div className="flex h-[420px] flex-col items-center justify-center gap-3 bg-slate-100 px-6 text-center text-sm text-slate-500">
         <p>{error}</p>
-        {GOOGLE_MAPS_API_KEY && (
-          <button
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              setError(null);
-              setRetryAttempt((attempt) => attempt + 1);
-            }}
-            type="button"
-          >
-            地図を再読み込み
-          </button>
-        )}
+        <button
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50"
+          onClick={() => {
+            setError(null);
+            setRetryAttempt((attempt) => attempt + 1);
+          }}
+          type="button"
+        >
+          地図を再読み込み
+        </button>
       </div>
     );
   }
