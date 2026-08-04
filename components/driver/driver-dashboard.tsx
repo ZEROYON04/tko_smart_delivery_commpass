@@ -529,7 +529,7 @@ export function DriverDashboard({ runId }: { runId: string }) {
           </button>
         ) : null}
 
-        <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+        <div className="space-y-5">
           <CurrentDeliveryCard
             key={currentStop?.delivery.id ?? "completed"}
             stop={currentStop}
@@ -550,12 +550,10 @@ export function DriverDashboard({ runId }: { runId: string }) {
                 <span className="flex size-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
                   ◫
                 </span>
-                <h2 className="font-bold text-slate-900">
-                  デモ経路・次の6件
-                </h2>
+                <h2 className="font-bold text-slate-900">経路</h2>
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                全120件から直近6件だけを表示。短時間不在で線と順番が変わります
+                全120件から次の6件を地図に表示。短時間不在に応じて道路経路と訪問順を更新
               </p>
             </div>
             <button
