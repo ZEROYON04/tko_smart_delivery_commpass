@@ -104,4 +104,5 @@ export type RouteOptimizationResponse = {
   totalDurationSeconds: number;
   reason: string;
   orderedDeliveryIds: string[];
+  feasible: boolean;
 };

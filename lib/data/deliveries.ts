@@ -222,7 +222,7 @@ export async function getRunResponse(
     const delivery = deliveriesById.get(stop.delivery_id);
     const leg = legsByOrder.get(stop.stop_order);
 
-    if (!delivery || !leg) {
+    if (!delivery) {
       return [];
     }
 
@@ -232,10 +232,10 @@ export async function getRunResponse(
         stopOrder: stop.stop_order,
         estimatedArrival: stop.estimated_arrival,
         locked: stop.locked,
-        distanceMeters: leg.distance_meters,
-        durationSeconds: leg.duration_seconds,
-        provider: leg.provider,
-        geometry: Array.isArray(leg.route_geometry)
+        distanceMeters: leg?.distance_meters ?? 0,
+        durationSeconds: leg?.duration_seconds ?? 0,
+        provider: leg?.provider ?? "none",
+        geometry: Array.isArray(leg?.route_geometry)
           ? (leg.route_geometry as Array<{
               latitude: number;
               longitude: number;

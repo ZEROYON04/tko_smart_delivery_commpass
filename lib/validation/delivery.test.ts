@@ -26,6 +26,15 @@ describe("delivery method validation", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("requires the recipient to choose a dropoff location", () => {
+    expect(
+      deliveryMethodRequestSchema.safeParse({
+        method: "dropoff",
+        version: 2,
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("delivery date validation", () => {

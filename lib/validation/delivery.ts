@@ -9,11 +9,18 @@ export const dropoffLocationSchema = z.enum([
   "other",
 ]);
 
-export const deliveryMethodRequestSchema = z.object({
-  method: z.enum(["handoff", "dropoff"]),
-  dropoffLocation: dropoffLocationSchema.nullable().optional(),
-  version: z.number().int().positive(),
-});
+export const deliveryMethodRequestSchema = z.discriminatedUnion("method", [
+  z.object({
+    method: z.literal("handoff"),
+    dropoffLocation: z.null().optional(),
+    version: z.number().int().positive(),
+  }),
+  z.object({
+    method: z.literal("dropoff"),
+    dropoffLocation: dropoffLocationSchema,
+    version: z.number().int().positive(),
+  }),
+]);
 
 const deliveryDateSchema = z
   .string()

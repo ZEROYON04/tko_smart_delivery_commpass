@@ -7,12 +7,7 @@ import { StatusBadge } from "@/components/common/status-badge";
 import { DROPOFF_LOCATION_LABELS } from "@/lib/constants/delivery";
 import { formatDeliveryDate } from "@/lib/format/delivery";
 import { useDeliveryRealtime } from "@/hooks/use-delivery-realtime";
-import type {
-  DeliveryMethod,
-  DeliveryStatus,
-  DropoffLocation,
-  RunResponse,
-} from "@/types/delivery";
+import type { DeliveryStatus, RunResponse } from "@/types/delivery";
 import { CurrentDeliveryCard } from "./current-delivery-card";
 import { DeliveryList } from "./delivery-list";
 import { DeliveryRouteMap } from "./delivery-route-map";
@@ -156,7 +151,10 @@ export function DriverDashboard({ runId }: { runId: string }) {
 
   useEffect(() => {
     if (!data || initialRouteRefreshAttempted.current) return;
-    if (data.stops.every((stop) => stop.provider === "osrm")) return;
+    const routedStops = data.stops.filter((stop) =>
+      ["pending", "out_for_delivery"].includes(stop.delivery.status),
+    );
+    if (routedStops.every((stop) => stop.provider === "osrm")) return;
     initialRouteRefreshAttempted.current = true;
     const refreshTimer = window.setTimeout(() => {
       void optimizeCurrentRoute("initial-real-road-route", false);
@@ -211,60 +209,6 @@ export function DriverDashboard({ runId }: { runId: string }) {
         updateError instanceof Error
           ? updateError.message
           : "更新に失敗しました。",
-      );
-    } finally {
-      setUpdating(false);
-    }
-  }
-
-  async function updateDeliveryMethod(input: {
-    method: DeliveryMethod;
-    dropoffLocation: DropoffLocation | null;
-  }) {
-    const currentStop = data?.stops.find(
-      (stop) => stop.stopOrder === data.run.currentStopOrder,
-    );
-    if (!currentStop) return;
-
-    setUpdating(true);
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/deliveries/${currentStop.delivery.id}/method`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...input,
-            version: currentStop.delivery.version,
-          }),
-        },
-      );
-      const body: unknown = await response.json();
-      if (!response.ok) {
-        throw new Error(
-          typeof body === "object" && body && "message" in body
-            ? String(body.message)
-            : "受取方法を更新できませんでした。",
-        );
-      }
-
-      const detail =
-        input.method === "dropoff"
-          ? input.dropoffLocation
-            ? `置き配場所を「${DROPOFF_LOCATION_LABELS[input.dropoffLocation]}」に設定しました。`
-            : "置き配に変更しました。場所は未指定です。"
-          : "対面受取に変更しました。";
-      setNotice({
-        title: detail,
-        body: "滞在時間と後続の到着予定時刻を更新しました。配送順は維持されています。",
-      });
-      await loadData();
-    } catch (methodError) {
-      setError(
-        methodError instanceof Error
-          ? methodError.message
-          : "受取方法を更新できませんでした。",
       );
     } finally {
       setUpdating(false);
@@ -507,7 +451,6 @@ export function DriverDashboard({ runId }: { runId: string }) {
             key={currentStop?.delivery.id ?? "completed"}
             stop={currentStop}
             updating={updating}
-            onMethodChange={(input) => void updateDeliveryMethod(input)}
             onStatusChange={(status) => void updateStatus(status)}
           />
           <RouteOverview

@@ -18,6 +18,7 @@ import {
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
   DeliveryMethod,
+  DropoffLocation,
   RecipientDeliveryResponse,
 } from "@/types/delivery";
 
@@ -45,6 +46,13 @@ export function DeliveryMethodForm({
     initialData,
   );
   const [updating, setUpdating] = useState<DeliveryMethod | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<DeliveryMethod>(
+    initialData.delivery.deliveryMethod,
+  );
+  const [selectedDropoffLocation, setSelectedDropoffLocation] =
+    useState<DropoffLocation>(
+      initialData.delivery.dropoffLocation ?? "front_door",
+    );
   const [windowUpdating, setWindowUpdating] = useState(false);
   const [reattemptUpdating, setReattemptUpdating] = useState(false);
   const [selectedDate, setSelectedDate] = useState(
@@ -79,6 +87,10 @@ export function DeliveryMethodForm({
 
       const nextData = body as RecipientDeliveryResponse;
       setData(nextData);
+      setSelectedMethod(nextData.delivery.deliveryMethod);
+      setSelectedDropoffLocation(
+        nextData.delivery.dropoffLocation ?? "front_door",
+      );
       setSelectedDate(
         nextData.deliveryDate < getTodayInJst()
           ? getTodayInJst()
@@ -122,10 +134,18 @@ export function DeliveryMethodForm({
     };
   }, [deliveryId, loadDelivery]);
 
-  async function changeMethod(method: DeliveryMethod) {
-    if (!data || method === data.delivery.deliveryMethod) return;
+  async function changeMethod() {
+    if (!data) return;
+    const dropoffLocation =
+      selectedMethod === "dropoff" ? selectedDropoffLocation : null;
+    if (
+      selectedMethod === data.delivery.deliveryMethod &&
+      dropoffLocation === data.delivery.dropoffLocation
+    ) {
+      return;
+    }
 
-    setUpdating(method);
+    setUpdating(selectedMethod);
     setError(null);
     setSuccess(null);
 
@@ -136,7 +156,11 @@ export function DeliveryMethodForm({
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ method, version: data.delivery.version }),
+          body: JSON.stringify({
+            method: selectedMethod,
+            dropoffLocation,
+            version: data.delivery.version,
+          }),
         },
       );
       const body: unknown = await response.json();
@@ -151,8 +175,8 @@ export function DeliveryMethodForm({
 
       await loadDelivery();
       setSuccess(
-        method === "dropoff"
-          ? "置き配へ変更しました。ドライバーの画面にも変更が反映されます。"
+        selectedMethod === "dropoff"
+          ? `置き配場所を「${DROPOFF_LOCATION_LABELS[selectedDropoffLocation]}」に設定しました。ドライバー画面にも反映されます。`
           : "対面受取へ変更しました。ドライバーの画面にも変更が反映されます。",
       );
     } catch (updateError) {
@@ -283,6 +307,11 @@ export function DeliveryMethodForm({
   }
 
   const isFinished = ["delivered", "cancelled"].includes(data.delivery.status);
+  const selectedLocation =
+    selectedMethod === "dropoff" ? selectedDropoffLocation : null;
+  const methodChanged =
+    selectedMethod !== data.delivery.deliveryMethod ||
+    selectedLocation !== data.delivery.dropoffLocation;
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] pb-10">
@@ -421,6 +450,9 @@ export function DeliveryMethodForm({
                 data.delivery.requestedWindowCode,
               )}
             </p>
+            <p className="mt-1 text-xs leading-5 text-blue-700">
+              本日分は、まだ終了していない現在の時間帯も選択できます。現在地・実道路の移動時間・各荷物の時間枠を比較し、最短で回れる配送順へ再計算します。
+            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="text-xs font-semibold text-slate-600">
                 希望日
@@ -502,50 +534,69 @@ export function DeliveryMethodForm({
             </div>
           )}
 
-          <div className="mt-6 grid gap-3">
+          <div className="mt-6 rounded-2xl border border-teal-200 bg-teal-50/60 p-4">
+            <p className="text-xs font-semibold text-teal-700">
+              受取方法・置き配場所
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              受取人ご本人が受取方法と、置き配の場合の場所を指定します。
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-slate-600">
+                受取方法
+                <select
+                  aria-label="受取方法"
+                  className="mt-1.5 min-h-12 w-full rounded-xl border border-teal-200 bg-white px-3 text-sm font-semibold text-slate-800"
+                  disabled={Boolean(updating) || isFinished}
+                  onChange={(event) =>
+                    setSelectedMethod(event.target.value as DeliveryMethod)
+                  }
+                  value={selectedMethod}
+                >
+                  <option value="handoff">対面で受け取る</option>
+                  <option value="dropoff">置き配で受け取る</option>
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-slate-600">
+                置き配場所
+                <select
+                  aria-label="置き配場所"
+                  className="mt-1.5 min-h-12 w-full rounded-xl border border-teal-200 bg-white px-3 text-sm font-semibold text-slate-800 disabled:bg-slate-100"
+                  disabled={
+                    Boolean(updating) ||
+                    isFinished ||
+                    selectedMethod !== "dropoff"
+                  }
+                  onChange={(event) =>
+                    setSelectedDropoffLocation(
+                      event.target.value as DropoffLocation,
+                    )
+                  }
+                  value={selectedDropoffLocation}
+                >
+                  {Object.entries(DROPOFF_LOCATION_LABELS).map(
+                    ([location, label]) => (
+                      <option key={location} value={location}>
+                        {label}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+            </div>
             <button
-              className={`min-h-14 w-full rounded-2xl px-5 py-4 text-base font-bold transition disabled:cursor-not-allowed disabled:opacity-55 ${
-                data.delivery.deliveryMethod === "dropoff"
-                  ? "border-2 border-teal-500 bg-teal-50 text-teal-800"
-                  : "bg-teal-600 text-white shadow-lg shadow-teal-900/10 hover:bg-teal-700"
-              }`}
+              className="mt-3 min-h-12 w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={
                 Boolean(updating) ||
                 windowUpdating ||
                 reattemptUpdating ||
                 isFinished ||
-                data.delivery.deliveryMethod === "dropoff"
+                !methodChanged
               }
-              onClick={() => void changeMethod("dropoff")}
+              onClick={() => void changeMethod()}
               type="button"
             >
-              {updating === "dropoff"
-                ? "変更しています…"
-                : data.delivery.deliveryMethod === "dropoff"
-                  ? "✓ 置き配に設定されています"
-                  : "置き配へ変更する"}
-            </button>
-            <button
-              className={`min-h-14 w-full rounded-2xl px-5 py-4 text-base font-bold transition disabled:cursor-not-allowed disabled:opacity-55 ${
-                data.delivery.deliveryMethod === "handoff"
-                  ? "border-2 border-blue-500 bg-blue-50 text-blue-800"
-                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-              disabled={
-                Boolean(updating) ||
-                windowUpdating ||
-                reattemptUpdating ||
-                isFinished ||
-                data.delivery.deliveryMethod === "handoff"
-              }
-              onClick={() => void changeMethod("handoff")}
-              type="button"
-            >
-              {updating === "handoff"
-                ? "変更しています…"
-                : data.delivery.deliveryMethod === "handoff"
-                  ? "✓ 対面受取に設定されています"
-                  : "対面受取へ戻す"}
+              {updating ? "変更しています…" : "受取方法を保存"}
             </button>
           </div>
 

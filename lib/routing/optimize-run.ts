@@ -9,8 +9,8 @@ import { optimizeRoute } from "./optimize-route";
 import type { Coordinate, RoutingProvider } from "./types";
 
 function activeStops(stops: RouteStop[]) {
-  return stops.filter(
-    (stop) => !["delivered", "cancelled"].includes(stop.delivery.status),
+  return stops.filter((stop) =>
+    ["pending", "out_for_delivery"].includes(stop.delivery.status),
   );
 }
 
@@ -41,8 +41,16 @@ async function rollExpiredDeliveryWindows(
 
   const supabase = createSupabaseAdminClient();
   for (const stop of expired) {
+    const scheduledDate = stop.delivery.windowEnd
+      ? new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Tokyo",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(stop.delivery.windowEnd))
+      : deliveryDate;
     const window = resolveReattemptWindow({
-      deliveryDate,
+      deliveryDate: scheduledDate,
       carrier: stop.delivery.carrier,
       currentWindowCode: stop.delivery.requestedWindowCode,
       returnAt: startTime,
@@ -179,5 +187,6 @@ export async function optimizeDeliveryRun(
     ),
     reason: note,
     orderedDeliveryIds: orderedStops.map((stop) => stop.delivery.id),
+    feasible: optimized.feasible,
   };
 }

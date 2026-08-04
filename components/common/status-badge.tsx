@@ -37,13 +37,11 @@ export function StatusBadge(props: StatusBadgeProps) {
           : props.value === "completed"
             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
             : "border-amber-200 bg-amber-50 text-amber-800"
-        : props.value === "delivered"
+        : ["delivered", "cancelled"].includes(props.value)
           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
           : props.value === "absent"
             ? "border-amber-200 bg-amber-50 text-amber-800"
-            : props.value === "out_for_delivery"
-              ? "border-blue-200 bg-blue-50 text-blue-700"
-              : "border-slate-200 bg-slate-50 text-slate-600";
+            : "border-slate-200 bg-slate-50 text-slate-600";
 
   return (
     <span
