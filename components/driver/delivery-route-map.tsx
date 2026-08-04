@@ -51,6 +51,11 @@ function drawRouteOverlay(
   overlay: SVGSVGElement,
   stops: RouteStop[],
 ) {
+  const canvas = map.getCanvas();
+  overlay.setAttribute(
+    "viewBox",
+    `0 0 ${canvas.clientWidth} ${canvas.clientHeight}`,
+  );
   overlay.replaceChildren();
 
   for (const stop of stops) {
@@ -100,14 +105,20 @@ function createStopPopupContent(stop: RouteStop) {
 
 function updateStopMarkerElement(element: HTMLDivElement, stop: RouteStop) {
   element.className = `route-map-marker ${
-    stop.delivery.isReattempt
-      ? "route-map-marker-reattempt"
-      : stop.delivery.status === "delivered"
-        ? "route-map-marker-delivered"
-        : ""
+    stop.delivery.status === "absent"
+      ? "route-map-marker-absent"
+      : stop.delivery.isReattempt
+        ? "route-map-marker-reattempt"
+        : stop.delivery.status === "delivered"
+          ? "route-map-marker-delivered"
+          : ""
   }`;
-  element.textContent = String(stop.stopOrder);
-  element.title = `${stop.stopOrder}. ${stop.delivery.address}`;
+  element.textContent =
+    stop.delivery.status === "absent" ? "不在" : String(stop.stopOrder);
+  element.title =
+    stop.delivery.status === "absent"
+      ? `不在: ${stop.delivery.address}`
+      : `${stop.stopOrder}. ${stop.delivery.address}`;
 }
 
 function clearRenderedMap(state: RenderedMapState | null) {
@@ -167,6 +178,8 @@ export function DeliveryRouteMap({
           "svg",
         );
         routeOverlay.setAttribute("aria-hidden", "true");
+        routeOverlay.setAttribute("class", "route-map-overlay");
+        routeOverlay.setAttribute("preserveAspectRatio", "none");
         routeOverlay.style.position = "absolute";
         routeOverlay.style.inset = "0";
         routeOverlay.style.width = "100%";
@@ -176,6 +189,7 @@ export function DeliveryRouteMap({
         containerRef.current.append(routeOverlay);
         routeOverlayRef.current = routeOverlay;
         map.addControl(new maplibregl.NavigationControl(), "top-right");
+        setMapGeneration((generation) => generation + 1);
         map.once("load", () => {
           if (!cancelled) {
             setMapGeneration((generation) => generation + 1);
@@ -210,18 +224,18 @@ export function DeliveryRouteMap({
   }, [retryAttempt]);
 
   useEffect(() => {
+    const renderTimer = window.setTimeout(() => {
+      setMapGeneration((generation) => generation + 1);
+    }, 100);
+    return () => window.clearTimeout(renderTimer);
+  }, [depot.latitude, depot.longitude, latestLocation, stops]);
+
+  useEffect(() => {
     const maplibregl = mapLibreRef.current;
     const map = mapRef.current;
     const routeOverlay = routeOverlayRef.current;
     const rendered = renderedMapRef.current;
-    if (
-      !maplibregl ||
-      !map ||
-      !routeOverlay ||
-      !rendered ||
-      !map.isStyleLoaded()
-    )
-      return;
+    if (!maplibregl || !map || !rendered) return;
 
     const visibleStops = stops.filter(
       (stop) => !["delivered", "cancelled"].includes(stop.delivery.status),
@@ -229,9 +243,11 @@ export function DeliveryRouteMap({
     const routedStops = visibleStops.filter((stop) =>
       ["pending", "out_for_delivery"].includes(stop.delivery.status),
     );
-    const redrawRoute = () => drawRouteOverlay(map, routeOverlay, routedStops);
+    const redrawRoute = () => {
+      if (routeOverlay) drawRouteOverlay(map, routeOverlay, routedStops);
+    };
     redrawRoute();
-    map.on("move", redrawRoute);
+    map.on("render", redrawRoute);
     map.on("resize", redrawRoute);
 
     const depotPosition: [number, number] = [depot.longitude, depot.latitude];
@@ -319,7 +335,7 @@ export function DeliveryRouteMap({
     map.fitBounds(bounds, { padding: 54, maxZoom: 14, duration: 0 });
     map.triggerRepaint();
     return () => {
-      map.off("move", redrawRoute);
+      map.off("render", redrawRoute);
       map.off("resize", redrawRoute);
     };
   }, [

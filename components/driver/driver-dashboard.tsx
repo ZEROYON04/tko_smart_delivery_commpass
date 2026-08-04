@@ -165,8 +165,10 @@ export function DriverDashboard({ runId }: { runId: string }) {
   async function updateStatus(
     status: Extract<DeliveryStatus, "delivered" | "absent">,
   ) {
-    const currentStop = data?.stops.find(
-      (stop) => stop.stopOrder === data.run.currentStopOrder,
+    const currentData = data;
+    if (!currentData) return;
+    const currentStop = currentData.stops.find(
+      (stop) => stop.stopOrder === currentData.run.currentStopOrder,
     );
     if (!currentStop) return;
 
@@ -193,6 +195,26 @@ export function DriverDashboard({ runId }: { runId: string }) {
         );
       }
 
+      const locationResponse = await fetch(`/api/runs/${runId}/location`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          latitude: currentStop.delivery.latitude,
+          longitude: currentStop.delivery.longitude,
+        }),
+      });
+      if (!locationResponse.ok) {
+        throw new Error(
+          "配達状態は更新されましたが、ドライバーの現在地を更新できませんでした。",
+        );
+      }
+
+      const hasRemainingStops = currentData.stops.some(
+        (stop) =>
+          stop.delivery.id !== currentStop.delivery.id &&
+          ["pending", "out_for_delivery"].includes(stop.delivery.status),
+      );
+
       setNotice({
         title:
           status === "delivered"
@@ -200,10 +222,17 @@ export function DriverDashboard({ runId }: { runId: string }) {
             : "ご不在として記録しました。",
         body:
           status === "delivered"
-            ? "次の配送先へ進みます。配送順は維持されています。"
-            : "受取人画面から再配達の日付と時間帯を指定できます。次の配送先へ進みます。",
+            ? "現在地を更新し、次の配送先までのルートを再計算しました。"
+            : "現在地を更新しました。受取人は再配達の日付と時間帯を指定できます。",
       });
-      await loadData();
+      setLocationMessage(
+        `現在地を${currentStop.delivery.address}へ更新しました。`,
+      );
+      if (hasRemainingStops) {
+        await optimizeCurrentRoute("status-change-location", false);
+      } else {
+        await loadData();
+      }
     } catch (updateError) {
       setError(
         updateError instanceof Error

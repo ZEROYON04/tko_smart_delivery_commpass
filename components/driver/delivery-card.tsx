@@ -57,12 +57,18 @@ export function DeliveryCard({ stop }: { stop: RouteStop }) {
           className={`flex size-10 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
             stop.delivery.status === "delivered"
               ? "bg-emerald-100 text-emerald-700"
-              : isDropoff
-                ? "bg-teal-100 text-teal-800"
-                : "bg-slate-100 text-slate-700"
+              : stop.delivery.status === "absent"
+                ? "bg-amber-100 text-amber-800"
+                : isDropoff
+                  ? "bg-teal-100 text-teal-800"
+                  : "bg-slate-100 text-slate-700"
           }`}
         >
-          {stop.delivery.status === "delivered" ? "✓" : stop.stopOrder}
+          {stop.delivery.status === "delivered"
+            ? "✓"
+            : stop.delivery.status === "absent"
+              ? "不在"
+              : stop.stopOrder}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">

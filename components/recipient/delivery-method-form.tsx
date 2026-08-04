@@ -9,6 +9,7 @@ import {
   formatEta,
   formatRelativeArrival,
   formatServiceTime,
+  isEtaWithin24Hours,
 } from "@/lib/format/delivery";
 import {
   CARRIER_LABELS,
@@ -312,6 +313,7 @@ export function DeliveryMethodForm({
   const methodChanged =
     selectedMethod !== data.delivery.deliveryMethod ||
     selectedLocation !== data.delivery.dropoffLocation;
+  const showEstimatedArrival = isEtaWithin24Hours(data.stop.estimatedArrival);
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] pb-10">
@@ -340,13 +342,17 @@ export function DeliveryMethodForm({
             {formatDeliveryDate(data.deliveryDate)} お届け予定
           </p>
           <p className="mt-3 text-2xl font-bold tracking-tight">
-            {formatRelativeArrival(data.stop.estimatedArrival)}
+            {showEstimatedArrival
+              ? formatRelativeArrival(data.stop.estimatedArrival)
+              : "到着予定時刻は24時間前から表示します"}
           </p>
           <div className="mt-5 flex items-center justify-between rounded-2xl bg-white/12 px-4 py-3 backdrop-blur-sm">
             <div>
               <p className="text-[11px] text-blue-100">到着予定時刻</p>
               <p className="mt-0.5 text-xl font-bold tabular-nums">
-                {formatEta(data.stop.estimatedArrival)}
+                {showEstimatedArrival
+                  ? formatEta(data.stop.estimatedArrival)
+                  : "--:--"}
               </p>
             </div>
             <div className="text-right">
