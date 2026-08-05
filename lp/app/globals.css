@@ -2,7 +2,8 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #0f172a;
+  --foreground: #071a33;
+  --scroll-progress: 0;
 }
 
 * {
@@ -11,24 +12,205 @@
 
 html {
   scroll-behavior: smooth;
+  background: var(--background);
 }
 
 body {
   margin: 0;
+  overflow-x: hidden;
   background: var(--background);
   color: var(--foreground);
   font-family:
-    "Noto Sans JP", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", sans-serif;
+    "Noto Sans JP", "Yu Gothic UI", "Yu Gothic",
+    "Hiragino Kaku Gothic ProN", "Hiragino Sans", sans-serif;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+img {
+  max-width: 100%;
 }
 
 ::selection {
-  background: rgb(34 211 238 / 35%);
+  background: rgb(103 232 249 / 45%);
+  color: #071a33;
+}
+
+section {
+  scroll-margin-top: 0;
+}
+
+.scroll-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 100;
+  height: 4px;
+  background: linear-gradient(90deg, #22d3ee, #60a5fa, #fb923c);
+  transform: scaleX(var(--scroll-progress));
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.hero-grid {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 1) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 1) 1px, transparent 1px);
+  background-size: 52px 52px;
+}
+
+.route-line {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.route-line-back {
+  stroke: rgb(255 255 255 / 8%);
+  stroke-width: 16;
+}
+
+.route-line-front {
+  stroke: #67e8f9;
+  stroke-width: 3;
+  stroke-dasharray: 8 14;
+  animation: route-dash 16s linear infinite;
+}
+
+.route-point {
+  fill: #fb923c;
+  stroke: #071a33;
+  stroke-width: 5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: route-pulse 2.4s ease-in-out infinite;
+}
+
+.route-point-2 {
+  animation-delay: 0.7s;
+}
+
+.route-point-3 {
+  animation-delay: 1.4s;
+}
+
+.marquee-track {
+  display: inline-flex;
+  width: max-content;
+  animation: marquee 25s linear infinite;
+}
+
+.motion-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.motion-float-delayed {
+  animation: float-delayed 6.5s ease-in-out infinite;
+}
+
+.motion-spin-slow {
+  animation: spin-slow 18s linear infinite;
+}
+
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(38px);
+  transition:
+    opacity 0.8s cubic-bezier(0.2, 0.75, 0.25, 1),
+    transform 0.8s cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+
+[data-reveal].is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-card {
+  transition:
+    opacity 0.75s cubic-bezier(0.2, 0.75, 0.25, 1),
+    transform 0.75s cubic-bezier(0.2, 0.75, 0.25, 1),
+    box-shadow 0.35s ease;
+}
+
+.reveal-card:hover {
+  box-shadow: 0 28px 70px rgb(104 70 22 / 14%);
+}
+
+@keyframes route-dash {
+  to {
+    stroke-dashoffset: -440;
+  }
+}
+
+@keyframes route-pulse {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.75;
+  }
+
+  50% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+}
+
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-6deg);
+  }
+
+  50% {
+    transform: translateY(-14px) rotate(-4deg);
+  }
+}
+
+@keyframes float-delayed {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0);
+  }
+
+  50% {
+    transform: translateY(12px) rotate(1deg);
+  }
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-snap-type: y proximity;
+  }
+
+  main > section {
+    scroll-snap-align: start;
+  }
+}
+
+@media (max-width: 639px) {
+  .hero-grid {
+    background-size: 34px 34px;
+  }
+
+  .route-line-front {
+    stroke-width: 4;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+    scroll-snap-type: none;
   }
 
   *,
@@ -38,5 +220,10 @@ body {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  [data-reveal] {
+    opacity: 1;
+    transform: none;
   }
 }
