@@ -18,10 +18,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family:
-    "Noto Sans JP",
-    "Yu Gothic UI",
-    "Hiragino Kaku Gothic ProN",
-    sans-serif;
+    "Noto Sans JP", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", sans-serif;
   text-rendering: optimizeLegibility;
 }
 

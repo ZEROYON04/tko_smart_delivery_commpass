@@ -77,9 +77,7 @@ function SectionLabel({
       }`}
     >
       <span
-        className={`h-px w-10 ${
-          light ? "bg-cyan-300/60" : "bg-blue-600/50"
-        }`}
+        className={`h-px w-10 ${light ? "bg-cyan-300/60" : "bg-blue-600/50"}`}
       />
       <span>{number}</span>
       <span>{children}</span>
