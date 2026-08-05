@@ -109,9 +109,7 @@ function SectionTag({
       }`}
     >
       <span
-        className={`h-px w-10 ${
-          dark ? "bg-cyan-300/60" : "bg-blue-600/40"
-        }`}
+        className={`h-px w-10 ${dark ? "bg-cyan-300/60" : "bg-blue-600/40"}`}
       />
       <span>{number}</span>
       <span>{children}</span>
@@ -493,8 +491,8 @@ export default function Home() {
           <div className="marquee-track whitespace-nowrap text-[10px] font-black tracking-[0.22em] text-cyan-100/70">
             {Array.from({ length: 2 }).map((_, groupIndex) => (
               <span key={groupIndex}>
-                SMART DELIVERY COMPASS&nbsp;&nbsp;●&nbsp;&nbsp;CHANGE THE
-                PLAN, NOT THE PROMISE&nbsp;&nbsp;●&nbsp;&nbsp;HIROSHIMA
+                SMART DELIVERY COMPASS&nbsp;&nbsp;●&nbsp;&nbsp;CHANGE THE PLAN,
+                NOT THE PROMISE&nbsp;&nbsp;●&nbsp;&nbsp;HIROSHIMA
                 PROTOTYPE&nbsp;&nbsp;●&nbsp;&nbsp;
               </span>
             ))}
