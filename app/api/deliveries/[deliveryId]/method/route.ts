@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { optimizeDeliveryRun } from "@/lib/routing/optimize-run";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   deliveryMethodRequestSchema,
@@ -39,6 +40,19 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    const deliveryResult = await supabase
+      .from("deliveries")
+      .select("run_id")
+      .eq("id", deliveryId)
+      .maybeSingle();
+    if (deliveryResult.error) throw deliveryResult.error;
+    if (!deliveryResult.data) {
+      return NextResponse.json(
+        { message: "荷物が見つかりません。" },
+        { status: 404 },
+      );
+    }
+
     const { data, error } = await supabase.rpc(
       "change_delivery_method_details",
       {
@@ -67,7 +81,13 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     }
 
-    return NextResponse.json(methodResultSchema.parse(data));
+    const method = methodResultSchema.parse(data);
+    const optimization = await optimizeDeliveryRun(
+      deliveryResult.data.run_id,
+      `recipient-method-change:${deliveryId}`,
+    );
+
+    return NextResponse.json({ ...method, optimization });
   } catch (error) {
     console.error("Failed to change delivery method", { deliveryId, error });
     return NextResponse.json(

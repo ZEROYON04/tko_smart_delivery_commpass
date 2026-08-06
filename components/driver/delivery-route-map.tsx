@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import type {
-  GeoJSONSource,
   Map as MapLibreMap,
   Marker as MapLibreMarker,
   StyleSpecification,
@@ -32,10 +31,6 @@ const TILE_URL =
   process.env.NEXT_PUBLIC_MAP_TILE_URL ??
   "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
-const ROUTE_SOURCE_ID = "delivery-route";
-const ROUTE_SHADOW_LAYER_ID = "delivery-route-shadow";
-const ROUTE_LINE_LAYER_ID = "delivery-route-line";
-
 function createMapStyle(): StyleSpecification {
   return {
     version: 8,
@@ -51,23 +46,45 @@ function createMapStyle(): StyleSpecification {
   };
 }
 
-function createRouteData(coordinates: [number, number][]) {
-  return {
-    type: "FeatureCollection" as const,
-    features:
-      coordinates.length >= 2
-        ? [
-            {
-              type: "Feature" as const,
-              properties: {},
-              geometry: {
-                type: "LineString" as const,
-                coordinates,
-              },
-            },
-          ]
-        : [],
-  };
+function drawRouteOverlay(
+  map: MapLibreMap,
+  overlay: SVGSVGElement,
+  stops: RouteStop[],
+) {
+  const canvas = map.getCanvas();
+  overlay.setAttribute(
+    "viewBox",
+    `0 0 ${canvas.clientWidth} ${canvas.clientHeight}`,
+  );
+  overlay.replaceChildren();
+
+  for (const stop of stops) {
+    if (stop.geometry.length < 2) continue;
+    const pathData = stop.geometry
+      .map(({ longitude, latitude }, index) => {
+        const point = map.project([longitude, latitude]);
+        return `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`;
+      })
+      .join(" ");
+
+    for (const style of [
+      { color: "#ffffff", width: "10", opacity: "0.95" },
+      { color: "#1d4ed8", width: "6", opacity: "1" },
+    ]) {
+      const path = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "path",
+      );
+      path.setAttribute("d", pathData);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", style.color);
+      path.setAttribute("stroke-width", style.width);
+      path.setAttribute("stroke-opacity", style.opacity);
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      overlay.append(path);
+    }
+  }
 }
 
 function createStopPopupContent(stop: RouteStop) {
@@ -88,14 +105,20 @@ function createStopPopupContent(stop: RouteStop) {
 
 function updateStopMarkerElement(element: HTMLDivElement, stop: RouteStop) {
   element.className = `route-map-marker ${
-    stop.delivery.isReattempt
-      ? "route-map-marker-reattempt"
-      : stop.delivery.status === "delivered"
-        ? "route-map-marker-delivered"
-        : ""
+    stop.delivery.status === "absent"
+      ? "route-map-marker-absent"
+      : stop.delivery.isReattempt
+        ? "route-map-marker-reattempt"
+        : stop.delivery.status === "delivered"
+          ? "route-map-marker-delivered"
+          : ""
   }`;
-  element.textContent = String(stop.stopOrder);
-  element.title = `${stop.stopOrder}. ${stop.delivery.address}`;
+  element.textContent =
+    stop.delivery.status === "absent" ? "不在" : String(stop.stopOrder);
+  element.title =
+    stop.delivery.status === "absent"
+      ? `不在: ${stop.delivery.address}`
+      : `${stop.stopOrder}. ${stop.delivery.address}`;
 }
 
 function clearRenderedMap(state: RenderedMapState | null) {
@@ -118,6 +141,7 @@ export function DeliveryRouteMap({
   const initialDepotRef = useRef(depot);
   const mapLibreRef = useRef<MapLibreModule | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const routeOverlayRef = useRef<SVGSVGElement | null>(null);
   const renderedMapRef = useRef<RenderedMapState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mapGeneration, setMapGeneration] = useState(0);
@@ -149,7 +173,23 @@ export function DeliveryRouteMap({
           driverMarker: null,
           stopMarkers: new Map(),
         };
+        const routeOverlay = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "svg",
+        );
+        routeOverlay.setAttribute("aria-hidden", "true");
+        routeOverlay.setAttribute("class", "route-map-overlay");
+        routeOverlay.setAttribute("preserveAspectRatio", "none");
+        routeOverlay.style.position = "absolute";
+        routeOverlay.style.inset = "0";
+        routeOverlay.style.width = "100%";
+        routeOverlay.style.height = "100%";
+        routeOverlay.style.zIndex = "1";
+        routeOverlay.style.pointerEvents = "none";
+        containerRef.current.append(routeOverlay);
+        routeOverlayRef.current = routeOverlay;
         map.addControl(new maplibregl.NavigationControl(), "top-right");
+        setMapGeneration((generation) => generation + 1);
         map.once("load", () => {
           if (!cancelled) {
             setMapGeneration((generation) => generation + 1);
@@ -174,6 +214,8 @@ export function DeliveryRouteMap({
       if (mapRef.current === initializedMap) {
         clearRenderedMap(renderedMapRef.current);
         renderedMapRef.current = null;
+        routeOverlayRef.current?.remove();
+        routeOverlayRef.current = null;
         mapLibreRef.current = null;
         mapRef.current = null;
         initializedMap?.remove();
@@ -182,49 +224,31 @@ export function DeliveryRouteMap({
   }, [retryAttempt]);
 
   useEffect(() => {
+    const renderTimer = window.setTimeout(() => {
+      setMapGeneration((generation) => generation + 1);
+    }, 100);
+    return () => window.clearTimeout(renderTimer);
+  }, [depot.latitude, depot.longitude, latestLocation, stops]);
+
+  useEffect(() => {
     const maplibregl = mapLibreRef.current;
     const map = mapRef.current;
+    const routeOverlay = routeOverlayRef.current;
     const rendered = renderedMapRef.current;
-    if (!maplibregl || !map || !rendered || !map.isStyleLoaded()) return;
+    if (!maplibregl || !map || !rendered) return;
 
-    const routeCoordinates = stops
-      .flatMap((stop, index) =>
-        stop.geometry.map(({ longitude, latitude }, pointIndex) =>
-          index > 0 && pointIndex === 0
-            ? null
-            : ([longitude, latitude] as [number, number]),
-        ),
-      )
-      .filter((point): point is [number, number] => point !== null);
-    const routeData = createRouteData(routeCoordinates);
-    const existingRouteSource = map.getSource(ROUTE_SOURCE_ID) as
-      GeoJSONSource | undefined;
-
-    if (existingRouteSource) {
-      existingRouteSource.setData(routeData);
-    } else {
-      map.addSource(ROUTE_SOURCE_ID, { type: "geojson", data: routeData });
-      map.addLayer({
-        id: ROUTE_SHADOW_LAYER_ID,
-        type: "line",
-        source: ROUTE_SOURCE_ID,
-        paint: {
-          "line-color": "#ffffff",
-          "line-width": 8,
-          "line-opacity": 0.85,
-        },
-      });
-      map.addLayer({
-        id: ROUTE_LINE_LAYER_ID,
-        type: "line",
-        source: ROUTE_SOURCE_ID,
-        paint: {
-          "line-color": "#2563eb",
-          "line-width": 5,
-          "line-opacity": 0.92,
-        },
-      });
-    }
+    const visibleStops = stops.filter(
+      (stop) => !["delivered", "cancelled"].includes(stop.delivery.status),
+    );
+    const routedStops = visibleStops.filter((stop) =>
+      ["pending", "out_for_delivery"].includes(stop.delivery.status),
+    );
+    const redrawRoute = () => {
+      if (routeOverlay) drawRouteOverlay(map, routeOverlay, routedStops);
+    };
+    redrawRoute();
+    map.on("render", redrawRoute);
+    map.on("resize", redrawRoute);
 
     const depotPosition: [number, number] = [depot.longitude, depot.latitude];
     if (rendered.depotMarker) {
@@ -241,7 +265,7 @@ export function DeliveryRouteMap({
     }
 
     const activeStopIds = new Set<string>();
-    for (const stop of stops) {
+    for (const stop of visibleStops) {
       activeStopIds.add(stop.stopId);
       const position: [number, number] = [
         stop.delivery.longitude,
@@ -301,7 +325,7 @@ export function DeliveryRouteMap({
     }
 
     const bounds = new maplibregl.LngLatBounds(depotPosition, depotPosition);
-    for (const stop of stops) {
+    for (const stop of visibleStops) {
       bounds.extend([stop.delivery.longitude, stop.delivery.latitude]);
     }
     if (latestLocation) {
@@ -309,6 +333,11 @@ export function DeliveryRouteMap({
     }
     map.resize();
     map.fitBounds(bounds, { padding: 54, maxZoom: 14, duration: 0 });
+    map.triggerRepaint();
+    return () => {
+      map.off("render", redrawRoute);
+      map.off("resize", redrawRoute);
+    };
   }, [
     depot.latitude,
     depot.longitude,

@@ -43,10 +43,8 @@ function earliestServiceTime(stop: OptimizableStop, arrivalMs: number) {
   return Math.max(arrivalMs, availableMs, windowStartMs);
 }
 
-function isInsideWindow(stop: OptimizableStop, serviceStartMs: number) {
-  return (
-    !stop.windowEnd || serviceStartMs <= new Date(stop.windowEnd).getTime()
-  );
+function isInsideWindow(stop: OptimizableStop, serviceEndMs: number) {
+  return !stop.windowEnd || serviceEndMs <= new Date(stop.windowEnd).getTime();
 }
 
 function toResult(
@@ -159,7 +157,9 @@ export function optimizeRoute(input: RouteOptimizationInput): OptimizedRoute {
 
       const arrivalMs = state.cursorMs + duration * 1_000;
       const serviceStartMs = earliestServiceTime(input.stops[index], arrivalMs);
-      if (!isInsideWindow(input.stops[index], serviceStartMs)) continue;
+      const serviceEndMs =
+        serviceStartMs + input.stops[index].serviceSeconds * 1_000;
+      if (!isInsideWindow(input.stops[index], serviceEndMs)) continue;
 
       const nextVisited = [...state.visited];
       nextVisited[index] = true;
@@ -167,7 +167,7 @@ export function optimizeRoute(input: RouteOptimizationInput): OptimizedRoute {
         path: [...state.path, index],
         visited: nextVisited,
         matrixIndex: index + 1,
-        cursorMs: serviceStartMs + input.stops[index].serviceSeconds * 1_000,
+        cursorMs: serviceEndMs,
         travelSeconds: state.travelSeconds + duration,
         distanceMeters: state.distanceMeters + distance,
         waitingSeconds:

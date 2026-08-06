@@ -10,6 +10,15 @@ export function formatEta(value: string | null) {
   }).format(new Date(value));
 }
 
+export function isEtaWithin24Hours(value: string | null, nowMs = Date.now()) {
+  if (!value) return false;
+
+  const etaMs = new Date(value).getTime();
+  if (Number.isNaN(etaMs)) return false;
+
+  return etaMs - nowMs <= 24 * 60 * 60 * 1_000;
+}
+
 export function formatDeliveryDate(value: string) {
   return new Intl.DateTimeFormat("ja-JP", {
     month: "long",

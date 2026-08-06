@@ -21,9 +21,9 @@ export const DROPOFF_LOCATION_LABELS = {
 } as const;
 
 export const DELIVERY_STATUS_LABELS = {
-  pending: "配送待ち",
-  out_for_delivery: "配送中",
-  delivered: "配達完了",
-  absent: "ご不在",
-  cancelled: "キャンセル",
+  pending: "未対応",
+  out_for_delivery: "未対応",
+  delivered: "完了",
+  absent: "不在",
+  cancelled: "完了",
 } as const;

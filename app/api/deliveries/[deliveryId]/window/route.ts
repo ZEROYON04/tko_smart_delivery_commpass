@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { optimizeDeliveryRun } from "@/lib/routing/optimize-run";
 import {
   getTimeSlot,
-  resolveReattemptWindow,
+  resolveRequestedDeliveryWindow,
 } from "@/lib/scheduling/time-slots";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { deliveryWindowRequestSchema } from "@/lib/validation/delivery";
@@ -33,7 +33,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const parsed = deliveryWindowRequestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { message: "時間帯を確認してください。" },
+      { message: "日付と時間帯を確認してください。" },
       { status: 400 },
     );
   }
@@ -61,20 +61,25 @@ export async function PATCH(request: Request, context: RouteContext) {
       );
     }
 
-    const runResult = await supabase
-      .from("delivery_runs")
-      .select("delivery_date")
-      .eq("id", deliveryResult.data.run_id)
-      .single();
-    if (runResult.error) throw runResult.error;
-
-    const window = resolveReattemptWindow({
-      deliveryDate: runResult.data.delivery_date,
-      carrier,
-      currentWindowCode: null,
-      preferredWindowCode: parsed.data.windowCode,
-      returnAt: new Date(),
-    });
+    let window;
+    try {
+      window = resolveRequestedDeliveryWindow({
+        deliveryDate: parsed.data.deliveryDate,
+        carrier,
+        windowCode: parsed.data.windowCode,
+      });
+    } catch (windowError) {
+      if (
+        windowError instanceof Error &&
+        windowError.message === "PAST_DELIVERY_WINDOW"
+      ) {
+        return NextResponse.json(
+          { message: "過去の日時は指定できません。" },
+          { status: 400 },
+        );
+      }
+      throw windowError;
+    }
     const updateResult = await supabase.rpc("change_delivery_window", {
       p_delivery_id: deliveryId,
       p_expected_version: parsed.data.version,
@@ -96,9 +101,19 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const optimization = await optimizeDeliveryRun(
       deliveryResult.data.run_id,
-      `window-change:${deliveryId}:${window.code}`,
+      `window-change:${deliveryId}:${window.deliveryDate}:${window.code}`,
     );
-    return NextResponse.json({ window, optimization });
+    return NextResponse.json({
+      window: {
+        code: window.code,
+        label: window.label,
+        start: window.start.toISOString(),
+        end: window.end.toISOString(),
+        availableFrom: window.availableFrom.toISOString(),
+        deliveryDate: window.deliveryDate,
+      },
+      optimization,
+    });
   } catch (error) {
     console.error("Failed to change delivery window", { deliveryId, error });
     return NextResponse.json(

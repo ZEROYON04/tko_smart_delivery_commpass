@@ -50,12 +50,18 @@ export function RouteOverview({
                   className={`flex size-10 items-center justify-center rounded-2xl text-sm font-bold shadow-sm ${
                     stop.delivery.status === "delivered"
                       ? "bg-emerald-500 text-white"
-                      : stop.delivery.deliveryMethod === "dropoff"
-                        ? "bg-teal-100 text-teal-800 ring-2 ring-teal-300"
-                        : "bg-blue-600 text-white"
+                      : stop.delivery.status === "absent"
+                        ? "bg-amber-500 text-white"
+                        : stop.delivery.deliveryMethod === "dropoff"
+                          ? "bg-teal-100 text-teal-800 ring-2 ring-teal-300"
+                          : "bg-blue-600 text-white"
                   }`}
                 >
-                  {stop.delivery.status === "delivered" ? "✓" : stop.stopOrder}
+                  {stop.delivery.status === "delivered"
+                    ? "✓"
+                    : stop.delivery.status === "absent"
+                      ? "不在"
+                      : stop.stopOrder}
                 </span>
                 <span className="mt-2 max-w-24 truncate text-xs font-bold text-slate-800">
                   {stop.delivery.address.replace("東広島市 ", "")}
