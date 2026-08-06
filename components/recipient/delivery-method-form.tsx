@@ -5,9 +5,11 @@ import { useCallback, useEffect, useState } from "react";
 import { StatusBadge } from "@/components/common/status-badge";
 import { DROPOFF_LOCATION_LABELS } from "@/lib/constants/delivery";
 import {
+  formatDeliveryDate,
   formatEta,
   formatRelativeArrival,
   formatServiceTime,
+  isEtaWithin24Hours,
 } from "@/lib/format/delivery";
 import {
   CARRIER_LABELS,
@@ -17,8 +19,18 @@ import {
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
   DeliveryMethod,
+  DropoffLocation,
   RecipientDeliveryResponse,
 } from "@/types/delivery";
+
+function getTodayInJst() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
 
 export function DeliveryMethodForm({
   deliveryId,
@@ -35,9 +47,20 @@ export function DeliveryMethodForm({
     initialData,
   );
   const [updating, setUpdating] = useState<DeliveryMethod | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<DeliveryMethod>(
+    initialData.delivery.deliveryMethod,
+  );
+  const [selectedDropoffLocation, setSelectedDropoffLocation] =
+    useState<DropoffLocation>(
+      initialData.delivery.dropoffLocation ?? "front_door",
+    );
   const [windowUpdating, setWindowUpdating] = useState(false);
   const [reattemptUpdating, setReattemptUpdating] = useState(false);
-  const [returnInMinutes, setReturnInMinutes] = useState(60);
+  const [selectedDate, setSelectedDate] = useState(
+    initialData.deliveryDate < getTodayInJst()
+      ? getTodayInJst()
+      : initialData.deliveryDate,
+  );
   const [selectedWindow, setSelectedWindow] = useState(
     initialData.delivery.requestedWindowCode ?? "",
   );
@@ -65,6 +88,15 @@ export function DeliveryMethodForm({
 
       const nextData = body as RecipientDeliveryResponse;
       setData(nextData);
+      setSelectedMethod(nextData.delivery.deliveryMethod);
+      setSelectedDropoffLocation(
+        nextData.delivery.dropoffLocation ?? "front_door",
+      );
+      setSelectedDate(
+        nextData.deliveryDate < getTodayInJst()
+          ? getTodayInJst()
+          : nextData.deliveryDate,
+      );
       setSelectedWindow(nextData.delivery.requestedWindowCode ?? "");
       setError(null);
     } catch (loadError) {
@@ -103,10 +135,18 @@ export function DeliveryMethodForm({
     };
   }, [deliveryId, loadDelivery]);
 
-  async function changeMethod(method: DeliveryMethod) {
-    if (!data || method === data.delivery.deliveryMethod) return;
+  async function changeMethod() {
+    if (!data) return;
+    const dropoffLocation =
+      selectedMethod === "dropoff" ? selectedDropoffLocation : null;
+    if (
+      selectedMethod === data.delivery.deliveryMethod &&
+      dropoffLocation === data.delivery.dropoffLocation
+    ) {
+      return;
+    }
 
-    setUpdating(method);
+    setUpdating(selectedMethod);
     setError(null);
     setSuccess(null);
 
@@ -117,7 +157,11 @@ export function DeliveryMethodForm({
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ method, version: data.delivery.version }),
+          body: JSON.stringify({
+            method: selectedMethod,
+            dropoffLocation,
+            version: data.delivery.version,
+          }),
         },
       );
       const body: unknown = await response.json();
@@ -132,8 +176,8 @@ export function DeliveryMethodForm({
 
       await loadDelivery();
       setSuccess(
-        method === "dropoff"
-          ? "置き配へ変更しました。ドライバーの画面にも変更が反映されます。"
+        selectedMethod === "dropoff"
+          ? `置き配場所を「${DROPOFF_LOCATION_LABELS[selectedDropoffLocation]}」に設定しました。ドライバー画面にも反映されます。`
           : "対面受取へ変更しました。ドライバーの画面にも変更が反映されます。",
       );
     } catch (updateError) {
@@ -148,8 +192,13 @@ export function DeliveryMethodForm({
   }
 
   async function changeWindow() {
-    if (!data || !selectedWindow) return;
-    if (selectedWindow === data.delivery.requestedWindowCode) return;
+    if (!data || !selectedDate || !selectedWindow) return;
+    if (
+      selectedDate === data.deliveryDate &&
+      selectedWindow === data.delivery.requestedWindowCode
+    ) {
+      return;
+    }
 
     setWindowUpdating(true);
     setError(null);
@@ -162,6 +211,7 @@ export function DeliveryMethodForm({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            deliveryDate: selectedDate,
             windowCode: selectedWindow,
             version: data.delivery.version,
           }),
@@ -177,13 +227,13 @@ export function DeliveryMethodForm({
       }
       await loadDelivery();
       setSuccess(
-        "配達時間帯を変更し、ドライバーの配送順と到着予定を再計算しました。",
+        "お届け日時を変更し、ドライバーの配送順と到着予定を再計算しました。",
       );
     } catch (windowError) {
       setError(
         windowError instanceof Error
           ? windowError.message
-          : "配達時間帯を変更できませんでした。",
+          : "お届け日時を変更できませんでした。",
       );
     } finally {
       setWindowUpdating(false);
@@ -191,7 +241,7 @@ export function DeliveryMethodForm({
   }
 
   async function requestRedelivery() {
-    if (!data || !selectedWindow) return;
+    if (!data || !selectedDate || !selectedWindow) return;
 
     setReattemptUpdating(true);
     setError(null);
@@ -204,8 +254,8 @@ export function DeliveryMethodForm({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            returnInMinutes,
-            preferredWindowCode: selectedWindow,
+            deliveryDate: selectedDate,
+            windowCode: selectedWindow,
             version: data.delivery.version,
           }),
         },
@@ -220,7 +270,7 @@ export function DeliveryMethodForm({
       }
       await loadDelivery();
       setSuccess(
-        "再配達を受け付けました。ドライバーの配送順と到着予定を再計算しました。",
+        "指定した日時で再配達を受け付けました。ドライバーの配送順と到着予定を再計算しました。",
       );
     } catch (reattemptError) {
       setError(
@@ -258,6 +308,12 @@ export function DeliveryMethodForm({
   }
 
   const isFinished = ["delivered", "cancelled"].includes(data.delivery.status);
+  const selectedLocation =
+    selectedMethod === "dropoff" ? selectedDropoffLocation : null;
+  const methodChanged =
+    selectedMethod !== data.delivery.deliveryMethod ||
+    selectedLocation !== data.delivery.dropoffLocation;
+  const showEstimatedArrival = isEtaWithin24Hours(data.stop.estimatedArrival);
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] pb-10">
@@ -283,16 +339,20 @@ export function DeliveryMethodForm({
       <main className="mx-auto max-w-lg px-4 pt-6 sm:pt-8">
         <section className="overflow-hidden rounded-[28px] bg-gradient-to-br from-blue-700 via-blue-600 to-cyan-500 p-6 text-white shadow-xl shadow-blue-900/15">
           <p className="text-xs font-semibold tracking-wide text-blue-100">
-            本日お届け予定
+            {formatDeliveryDate(data.deliveryDate)} お届け予定
           </p>
           <p className="mt-3 text-2xl font-bold tracking-tight">
-            {formatRelativeArrival(data.stop.estimatedArrival)}
+            {showEstimatedArrival
+              ? formatRelativeArrival(data.stop.estimatedArrival)
+              : "到着予定時刻は24時間前から表示します"}
           </p>
           <div className="mt-5 flex items-center justify-between rounded-2xl bg-white/12 px-4 py-3 backdrop-blur-sm">
             <div>
               <p className="text-[11px] text-blue-100">到着予定時刻</p>
               <p className="mt-0.5 text-xl font-bold tabular-nums">
-                {formatEta(data.stop.estimatedArrival)}
+                {showEstimatedArrival
+                  ? formatEta(data.stop.estimatedArrival)
+                  : "--:--"}
               </p>
             </div>
             <div className="text-right">
@@ -353,38 +413,12 @@ export function DeliveryMethodForm({
               </p>
               {data.delivery.isReattempt ? (
                 <p className="mt-2 text-sm font-bold text-orange-900">
-                  この荷物は再配達ルートに設定済みです。下の欄から時間帯を変更できます。
+                  この荷物は再配達ルートに設定済みです。下の欄から日付と時間帯を変更できます。
                 </p>
               ) : data.delivery.status === "absent" ? (
-                <>
-                  <label className="mt-3 block text-xs font-semibold text-slate-600">
-                    受取可能になる目安
-                    <select
-                      className="mt-1.5 min-h-12 w-full rounded-xl border border-orange-200 bg-white px-3 text-sm font-semibold text-slate-800"
-                      disabled={reattemptUpdating}
-                      onChange={(event) =>
-                        setReturnInMinutes(Number(event.target.value))
-                      }
-                      value={returnInMinutes}
-                    >
-                      {[15, 30, 60, 90, 120, 180].map((minutes) => (
-                        <option key={minutes} value={minutes}>
-                          {minutes}分後
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    className="mt-3 min-h-12 w-full rounded-xl bg-orange-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
-                    disabled={reattemptUpdating || !selectedWindow}
-                    onClick={() => void requestRedelivery()}
-                    type="button"
-                  >
-                    {reattemptUpdating
-                      ? "再配達を計算中…"
-                      : "この時間帯で再配達を申し込む"}
-                  </button>
-                </>
+                <p className="mt-2 text-sm font-bold text-orange-900">
+                  下の「再配達日時」から、受け取り可能な日付と時間帯を指定してください。
+                </p>
               ) : (
                 <p className="mt-2 text-sm text-orange-900">
                   この荷物は現在、再配達の対象ではありません。
@@ -399,7 +433,12 @@ export function DeliveryMethodForm({
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-xs text-slate-500">配送会社・時間帯</p>
+                <p className="text-xs text-slate-500">
+                  {data.delivery.status === "absent" ||
+                  data.delivery.isReattempt
+                    ? "再配達日時"
+                    : "お届け日時"}
+                </p>
                 <p className="mt-1 font-bold text-slate-900">
                   {CARRIER_LABELS[data.delivery.carrier]}
                 </p>
@@ -411,39 +450,74 @@ export function DeliveryMethodForm({
               )}
             </div>
             <p className="mt-2 text-xs text-slate-500">
-              現在：
+              現在：{formatDeliveryDate(data.deliveryDate)}・
               {formatWindowLabel(
                 data.delivery.carrier,
                 data.delivery.requestedWindowCode,
               )}
             </p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-              <select
-                aria-label="希望する配達時間帯"
-                className="min-h-12 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800"
-                disabled={windowUpdating || isFinished}
-                onChange={(event) => setSelectedWindow(event.target.value)}
-                value={selectedWindow}
-              >
-                {getCarrierTimeSlots(data.delivery.carrier).map((slot) => (
-                  <option key={slot.code} value={slot.code}>
-                    {slot.label}
-                  </option>
-                ))}
-              </select>
+            <p className="mt-1 text-xs leading-5 text-blue-700">
+              本日分は、まだ終了していない現在の時間帯も選択できます。現在地・実道路の移動時間・各荷物の時間枠を比較し、最短で回れる配送順へ再計算します。
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-slate-600">
+                希望日
+                <input
+                  aria-label="希望する配達日"
+                  className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800"
+                  disabled={windowUpdating || reattemptUpdating || isFinished}
+                  min={getTodayInJst()}
+                  onInput={(event) =>
+                    setSelectedDate(event.currentTarget.value)
+                  }
+                  type="date"
+                  value={selectedDate}
+                />
+              </label>
+              <label className="text-xs font-semibold text-slate-600">
+                希望時間帯
+                <select
+                  aria-label="希望する配達時間帯"
+                  className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800"
+                  disabled={windowUpdating || reattemptUpdating || isFinished}
+                  onChange={(event) => setSelectedWindow(event.target.value)}
+                  value={selectedWindow}
+                >
+                  {getCarrierTimeSlots(data.delivery.carrier).map((slot) => (
+                    <option key={slot.code} value={slot.code}>
+                      {slot.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="mt-3">
               <button
-                className="min-h-12 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
+                className="min-h-12 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
                 disabled={
                   windowUpdating ||
                   reattemptUpdating ||
                   isFinished ||
+                  !selectedDate ||
                   !selectedWindow ||
-                  selectedWindow === data.delivery.requestedWindowCode
+                  (data.delivery.status !== "absent" &&
+                    selectedDate === data.deliveryDate &&
+                    selectedWindow === data.delivery.requestedWindowCode)
                 }
-                onClick={() => void changeWindow()}
+                onClick={() =>
+                  void (data.delivery.status === "absent" &&
+                  !data.delivery.isReattempt
+                    ? requestRedelivery()
+                    : changeWindow())
+                }
                 type="button"
               >
-                {windowUpdating ? "再計算中…" : "時間帯を変更"}
+                {windowUpdating || reattemptUpdating
+                  ? "再計算中…"
+                  : data.delivery.status === "absent" &&
+                      !data.delivery.isReattempt
+                    ? "この日時で再配達を申し込む"
+                    : "お届け日時を変更"}
               </button>
             </div>
           </div>
@@ -466,57 +540,76 @@ export function DeliveryMethodForm({
             </div>
           )}
 
-          <div className="mt-6 grid gap-3">
+          <div className="mt-6 rounded-2xl border border-teal-200 bg-teal-50/60 p-4">
+            <p className="text-xs font-semibold text-teal-700">
+              受取方法・置き配場所
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              受取人ご本人が受取方法と、置き配の場合の場所を指定します。
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-slate-600">
+                受取方法
+                <select
+                  aria-label="受取方法"
+                  className="mt-1.5 min-h-12 w-full rounded-xl border border-teal-200 bg-white px-3 text-sm font-semibold text-slate-800"
+                  disabled={Boolean(updating) || isFinished}
+                  onChange={(event) =>
+                    setSelectedMethod(event.target.value as DeliveryMethod)
+                  }
+                  value={selectedMethod}
+                >
+                  <option value="handoff">対面で受け取る</option>
+                  <option value="dropoff">置き配で受け取る</option>
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-slate-600">
+                置き配場所
+                <select
+                  aria-label="置き配場所"
+                  className="mt-1.5 min-h-12 w-full rounded-xl border border-teal-200 bg-white px-3 text-sm font-semibold text-slate-800 disabled:bg-slate-100"
+                  disabled={
+                    Boolean(updating) ||
+                    isFinished ||
+                    selectedMethod !== "dropoff"
+                  }
+                  onChange={(event) =>
+                    setSelectedDropoffLocation(
+                      event.target.value as DropoffLocation,
+                    )
+                  }
+                  value={selectedDropoffLocation}
+                >
+                  {Object.entries(DROPOFF_LOCATION_LABELS).map(
+                    ([location, label]) => (
+                      <option key={location} value={location}>
+                        {label}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+            </div>
             <button
-              className={`min-h-14 w-full rounded-2xl px-5 py-4 text-base font-bold transition disabled:cursor-not-allowed disabled:opacity-55 ${
-                data.delivery.deliveryMethod === "dropoff"
-                  ? "border-2 border-teal-500 bg-teal-50 text-teal-800"
-                  : "bg-teal-600 text-white shadow-lg shadow-teal-900/10 hover:bg-teal-700"
-              }`}
+              className="mt-3 min-h-12 w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={
                 Boolean(updating) ||
                 windowUpdating ||
                 reattemptUpdating ||
                 isFinished ||
-                data.delivery.deliveryMethod === "dropoff"
+                !methodChanged
               }
-              onClick={() => void changeMethod("dropoff")}
+              onClick={() => void changeMethod()}
               type="button"
             >
-              {updating === "dropoff"
-                ? "変更しています…"
-                : data.delivery.deliveryMethod === "dropoff"
-                  ? "✓ 置き配に設定されています"
-                  : "置き配へ変更する"}
-            </button>
-            <button
-              className={`min-h-14 w-full rounded-2xl px-5 py-4 text-base font-bold transition disabled:cursor-not-allowed disabled:opacity-55 ${
-                data.delivery.deliveryMethod === "handoff"
-                  ? "border-2 border-blue-500 bg-blue-50 text-blue-800"
-                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-              disabled={
-                Boolean(updating) ||
-                windowUpdating ||
-                reattemptUpdating ||
-                isFinished ||
-                data.delivery.deliveryMethod === "handoff"
-              }
-              onClick={() => void changeMethod("handoff")}
-              type="button"
-            >
-              {updating === "handoff"
-                ? "変更しています…"
-                : data.delivery.deliveryMethod === "handoff"
-                  ? "✓ 対面受取に設定されています"
-                  : "対面受取へ戻す"}
+              {updating ? "変更しています…" : "受取方法を保存"}
             </button>
           </div>
 
           <p className="mt-5 text-center text-xs leading-5 text-slate-400">
             受取方法だけの変更では配送順は変わりません。
             <br />
-            時間帯を変更した場合は残りの配送順とETAを再計算します。
+            日付または時間帯を変更した場合は残りの配送順とETAを再計算します。
           </p>
         </section>
 

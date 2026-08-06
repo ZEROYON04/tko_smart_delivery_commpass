@@ -19,12 +19,7 @@ const flow = [
   },
 ];
 
-const destinations = [
-  "東広島市立美術館",
-  "西条駅",
-  "道の駅 西条のん太の酒蔵",
-  "八本松駅",
-];
+const destinations = ["佐藤さん", "田中さん", "高橋さん", "鈴木さん"];
 
 export default function Home() {
   const runId = process.env.NEXT_PUBLIC_DEMO_RUN_ID || DEMO_RUN_ID;
@@ -40,7 +35,7 @@ export default function Home() {
               S
             </span>
             <div>
-              <p className="font-bold leading-tight">スマート配送コンパス</p>
+              <p className="font-bold leading-tight">スマ配（スマート配送）</p>
               <p className="text-[10px] tracking-[0.16em] text-blue-200">
                 IN HIROSHIMA
               </p>

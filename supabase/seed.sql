@@ -13,33 +13,40 @@ values
   (
     '00000000-0000-4000-8000-000000000401',
     'USER-A',
-    '美術館受付'
+    '高橋 直人（デモ）'
   ),
   (
     '00000000-0000-4000-8000-000000000402',
     'USER-B',
-    '西条駅受付'
+    '田中 美咲（デモ）'
   ),
   (
     '00000000-0000-4000-8000-000000000403',
     'USER-C',
-    '道の駅受付'
+    '佐藤 健太（デモ主役）'
   ),
   (
     '00000000-0000-4000-8000-000000000404',
     'USER-D',
-    '八本松駅受付'
+    '鈴木 陽子（デモ）'
   ),
   (
     '00000000-0000-4000-8000-000000000405',
     'USER-E',
-    '大学内郵便局受付'
+    '伊藤 大輔（デモ）'
   ),
   (
     '00000000-0000-4000-8000-000000000406',
     'USER-F',
-    '黒瀬支所受付'
+    '山本 葵（デモ）'
   );
+
+insert into public.recipient_accounts (id, customer_code, display_name)
+select
+  ('00000000-0000-4000-8000-' || lpad((500 + number)::text, 12, '0'))::uuid,
+  'MOCK-' || lpad(number::text, 3, '0'),
+  'デモ受取人 ' || lpad(number::text, 3, '0')
+from generate_series(1, 114) as number;
 
 insert into
   public.delivery_runs (
@@ -57,10 +64,10 @@ insert into
 values
   (
     '00000000-0000-4000-8000-000000000001',
-    '山田ドライバー',
+    '山田 一郎',
     current_date,
     'active',
-    1,
+    41,
     34.4263905,
     132.7433062,
     '東広島市役所 配送拠点',
@@ -93,12 +100,12 @@ values
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000401',
     'YAMATO-0001',
-    '美術館受付',
-    '広島県東広島市西条栄町9番1号',
-    34.4271780,
-    132.7423851,
+    '高橋 直人',
+    '広島県東広島市西条町寺家10020番地43',
+    34.4337928,
+    132.7036052,
     'handoff',
-    'out_for_delivery',
+    'delivered',
     300,
     'yamato',
     'morning',
@@ -111,12 +118,12 @@ values
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000402',
     'SAGAWA-0002',
-    '西条駅受付',
+    '田中 美咲',
     '広島県東広島市西条本町12番3号',
     34.4306213,
     132.7433314,
     'handoff',
-    'pending',
+    'delivered',
     300,
     'sagawa',
     'morning',
@@ -129,12 +136,12 @@ values
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000403',
     'YAMATO-0003',
-    '道の駅受付',
-    '広島県東広島市西条町寺家10020番地43',
-    34.4337928,
-    132.7036052,
+    '佐藤 健太',
+    '広島県東広島市西条栄町9番1号',
+    34.4292000,
+    132.7433000,
     'handoff',
-    'pending',
+    'out_for_delivery',
     300,
     'yamato',
     '14-16',
@@ -147,7 +154,7 @@ values
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000404',
     'POST-0004',
-    '八本松駅受付',
+    '鈴木 陽子',
     '広島県東広島市八本松町飯田1539番地3',
     34.4453355,
     132.6894352,
@@ -165,7 +172,7 @@ values
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000405',
     'SAGAWA-0005',
-    '大学内郵便局受付',
+    '伊藤 大輔',
     '広島県東広島市鏡山1丁目1番3号',
     34.4054033,
     132.7123605,
@@ -183,7 +190,7 @@ values
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000406',
     'POST-0006',
-    '黒瀬支所受付',
+    '山本 葵',
     '広島県東広島市黒瀬町丸山1333番地',
     34.3250814,
     132.6753086,
@@ -196,6 +203,113 @@ values
     (current_date::timestamp + time '20:00') at time zone 'Asia/Tokyo',
     '18_20'
   );
+
+with mock_deliveries as (
+  select
+    number,
+    case
+      when number <= 18 then 'morning'
+      when number <= 38 then '12-14'
+      when number <= 56 then '14-16'
+      when number <= 75 then '16-18'
+      when number <= 94 then '18-20'
+      else '19-21'
+    end as window_code,
+    case
+      when number <= 18 then 'morning'
+      when number <= 38 then '12_14'
+      when number <= 56 then '14_16'
+      when number <= 75 then '16_18'
+      when number <= 94 then '18_20'
+      else '19_21'
+    end as time_slot,
+    case
+      when number <= 18 then time '08:00'
+      when number <= 38 then time '12:00'
+      when number <= 56 then time '14:00'
+      when number <= 75 then time '16:00'
+      when number <= 94 then time '18:00'
+      else time '19:00'
+    end as window_start_time,
+    case
+      when number <= 18 then time '12:00'
+      when number <= 38 then time '14:00'
+      when number <= 56 then time '16:00'
+      when number <= 75 then time '18:00'
+      when number <= 94 then time '20:00'
+      else time '21:00'
+    end as window_end_time
+  from generate_series(1, 114) as number
+)
+insert into public.deliveries (
+  id,
+  run_id,
+  recipient_id,
+  tracking_number,
+  recipient_name,
+  address,
+  latitude,
+  longitude,
+  delivery_method,
+  status,
+  service_seconds,
+  carrier,
+  requested_window_code,
+  window_start,
+  window_end,
+  delivery_time_slot
+)
+select
+  ('00000000-0000-4000-8000-' || lpad((1000 + number)::text, 12, '0'))::uuid,
+  '00000000-0000-4000-8000-000000000001'::uuid,
+  ('00000000-0000-4000-8000-' || lpad((500 + number)::text, 12, '0'))::uuid,
+  'MOCK-' || lpad(number::text, 4, '0'),
+  case number
+    when 39 then '中村 結衣'
+    when 40 then '小林 翔'
+    when 41 then '加藤 美咲'
+    when 42 then '山田 陽菜'
+    when 43 then '松本 蓮'
+    else 'デモ受取人 ' || lpad(number::text, 3, '0')
+  end,
+  case number
+    when 39 then '広島県東広島市西条中央 デモ地点A'
+    when 40 then '広島県東広島市西条中央 デモ地点B'
+    when 41 then '広島県東広島市西条中央 デモ地点C'
+    when 42 then '広島県東広島市西条中央 デモ地点D'
+    when 43 then '広島県東広島市西条中央 デモ地点E'
+    else '広島県東広島市西条町デモ ' || number || '番地'
+  end,
+  case
+    when number = 39 then 34.4280000
+    when number = 40 then 34.4247000
+    when number = 41 then 34.4229000
+    when number = 42 then 34.4242000
+    when number = 43 then 34.4276000
+    when number between 44 and 56 then
+      34.4380000 + (((number - 44) % 5) * 0.0010)
+    else 34.4263905 + ((((number - 1) % 12) - 5.5) * 0.0012)
+      + ((floor((number - 1) / 12)::integer % 3) * 0.00025)
+  end,
+  case
+    when number = 39 then 132.7472000
+    when number = 40 then 132.7470000
+    when number = 41 then 132.7434000
+    when number = 42 then 132.7394000
+    when number = 43 then 132.7389000
+    when number between 44 and 56 then
+      132.7520000 + ((floor((number - 44) / 5)::integer) * 0.0012)
+    else 132.7433062 + (((floor((number - 1) / 12)::integer % 10) - 4.5) * 0.0015)
+  end,
+  'handoff',
+  case when number <= 38 then 'delivered' else 'pending' end,
+  90,
+  'sagawa',
+  window_code,
+  (current_date + window_start_time) at time zone 'Asia/Tokyo',
+  (current_date + window_end_time) at time zone 'Asia/Tokyo',
+  time_slot
+from mock_deliveries;
 
 insert into
   public.route_stops (id, run_id, delivery_id, stop_order, locked)
@@ -218,30 +332,44 @@ values
     '00000000-0000-4000-8000-000000000203',
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000103',
-    3,
+    41,
     true
   ),
   (
     '00000000-0000-4000-8000-000000000204',
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000104',
-    4,
+    42,
     true
   ),
   (
     '00000000-0000-4000-8000-000000000205',
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000105',
-    5,
+    61,
     true
   ),
   (
     '00000000-0000-4000-8000-000000000206',
     '00000000-0000-4000-8000-000000000001',
     '00000000-0000-4000-8000-000000000106',
-    6,
+    81,
     true
   );
+
+insert into public.route_stops (id, run_id, delivery_id, stop_order, locked)
+select
+  ('00000000-0000-4000-8000-' || lpad((2000 + number)::text, 12, '0'))::uuid,
+  '00000000-0000-4000-8000-000000000001'::uuid,
+  ('00000000-0000-4000-8000-' || lpad((1000 + number)::text, 12, '0'))::uuid,
+  case
+    when number <= 38 then number + 2
+    when number <= 56 then number + 4
+    when number <= 75 then number + 5
+    else number + 6
+  end,
+  true
+from generate_series(1, 114) as number;
 
 insert into
   public.route_legs (
@@ -263,7 +391,7 @@ values
     1,
     34.4263905,
     132.7433062,
-    '00000000-0000-4000-8000-000000000201',
+    '00000000-0000-4000-8000-000000000203',
     150,
     60,
     'seed-fallback',
@@ -287,7 +415,7 @@ values
     3,
     34.4306213,
     132.7433314,
-    '00000000-0000-4000-8000-000000000203',
+    '00000000-0000-4000-8000-000000000201',
     4200,
     600,
     'seed-fallback',

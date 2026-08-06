@@ -174,6 +174,31 @@ export function buildDeliveryWindow(
   };
 }
 
+type ResolveRequestedDeliveryWindowInput = {
+  deliveryDate: string;
+  carrier: Carrier;
+  windowCode: string;
+  now?: Date;
+};
+
+export function resolveRequestedDeliveryWindow({
+  deliveryDate,
+  carrier,
+  windowCode,
+  now = new Date(),
+}: ResolveRequestedDeliveryWindowInput) {
+  const window = buildDeliveryWindow(deliveryDate, carrier, windowCode);
+  if (window.end.getTime() <= now.getTime()) {
+    throw new Error("PAST_DELIVERY_WINDOW");
+  }
+
+  return {
+    ...window,
+    deliveryDate,
+    availableFrom: new Date(Math.max(now.getTime(), window.start.getTime())),
+  };
+}
+
 type ResolveReattemptWindowInput = {
   deliveryDate: string;
   carrier: Carrier;

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "スマート配送コンパス in 広島",
+  title: "スマ配（スマート配送）in 広島",
   description:
     "東広島市の実経路、会社別の配送時間帯、不在時の再配達ルート最適化を確認できる配送支援モック",
 };

@@ -269,3 +269,35 @@ export function createRedeliveryMenuMessage({
     },
   };
 }
+
+export function createAbsentRedeliveryGuideMessage({
+  trackingNumber,
+  recipientUrl,
+}: {
+  trackingNumber: string;
+  recipientUrl: string;
+}): LineMessage {
+  return {
+    type: "text",
+    text: [
+      "📭 スマ配｜ご不在のお知らせ",
+      "━━━━━━━━━━━━",
+      `📦 荷物番号　${trackingNumber}`,
+      "",
+      "お伺いしましたが、ご不在のため荷物を持ち戻りました。",
+      "下のボタンから、ご都合のよい再配達日時を指定してください。",
+    ].join("\n"),
+    quickReply: {
+      items: [
+        {
+          type: "action",
+          action: {
+            type: "uri",
+            label: "再配達日時を選ぶ",
+            uri: recipientUrl,
+          },
+        },
+      ],
+    },
+  };
+}

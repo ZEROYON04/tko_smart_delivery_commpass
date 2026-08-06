@@ -7,12 +7,7 @@ import { StatusBadge } from "@/components/common/status-badge";
 import { DROPOFF_LOCATION_LABELS } from "@/lib/constants/delivery";
 import { formatDeliveryDate } from "@/lib/format/delivery";
 import { useDeliveryRealtime } from "@/hooks/use-delivery-realtime";
-import type {
-  DeliveryMethod,
-  DeliveryStatus,
-  DropoffLocation,
-  RunResponse,
-} from "@/types/delivery";
+import type { DeliveryStatus, RunResponse } from "@/types/delivery";
 import { CurrentDeliveryCard } from "./current-delivery-card";
 import { DeliveryList } from "./delivery-list";
 import { DeliveryRouteMap } from "./delivery-route-map";
@@ -28,9 +23,6 @@ export function DriverDashboard({ runId }: { runId: string }) {
   const [routeUpdating, setRouteUpdating] = useState(false);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [deliveryDateInput, setDeliveryDateInput] = useState<string | null>(
-    null,
-  );
   const dataRef = useRef<RunResponse | null>(null);
   const initialRouteRefreshAttempted = useRef(false);
 
@@ -66,6 +58,18 @@ export function DriverDashboard({ runId }: { runId: string }) {
                   nextStop.delivery.dropoffLocation)
             );
           });
+          const availabilityChangedStop = nextData.stops.find((nextStop) => {
+            const previousStop = previousData.stops.find(
+              (candidate) => candidate.delivery.id === nextStop.delivery.id,
+            );
+            return (
+              previousStop &&
+              (previousStop.delivery.unavailableUntil !==
+                nextStop.delivery.unavailableUntil ||
+                previousStop.delivery.rescheduleRequestedAt !==
+                  nextStop.delivery.rescheduleRequestedAt)
+            );
+          });
 
           if (changedStop) {
             const method =
@@ -78,12 +82,29 @@ export function DriverDashboard({ runId }: { runId: string }) {
               title: `${changedStop.stopOrder}番目の荷物が${method}へ変更されました。`,
               body: "後続の到着予定時刻を更新しました。配送順は変更されていません。",
             });
+          } else if (availabilityChangedStop) {
+            setNotice({
+              title: availabilityChangedStop.delivery.unavailableUntil
+                ? `${availabilityChangedStop.delivery.recipientName}さんから短時間不在の連絡が届きました。`
+                : availabilityChangedStop.delivery.rescheduleRequestedAt
+                  ? `${availabilityChangedStop.delivery.recipientName}さんから本日不在の連絡が届きました。`
+                  : `${availabilityChangedStop.delivery.recipientName}さんが在宅へ変更しました。`,
+              body: "在宅予定を反映し、残りの配送順と到着予定を再計算します。",
+            });
           } else if (
             nextData.run.routeRevision !== previousData.run.routeRevision
           ) {
+            const movedStop = nextData.stops.find((nextStop) => {
+              const previousStop = previousData.stops.find(
+                (candidate) => candidate.delivery.id === nextStop.delivery.id,
+              );
+              return previousStop && previousStop.stopOrder !== nextStop.stopOrder;
+            });
             setNotice({
               title: "配送ルートを更新しました。",
-              body: "道路所要時間・在宅予定・配送時間帯を基に順番とETAを再計算しました。",
+              body: movedStop
+                ? `${movedStop.delivery.recipientName}さんの訪問順を${movedStop.stopOrder}番目へ変更し、ETAを再計算しました。`
+                : "道路所要時間・在宅予定・配送時間帯を基に順番とETAを再計算しました。",
             });
           }
         }
@@ -159,7 +180,10 @@ export function DriverDashboard({ runId }: { runId: string }) {
 
   useEffect(() => {
     if (!data || initialRouteRefreshAttempted.current) return;
-    if (data.stops.every((stop) => stop.provider === "osrm")) return;
+    const routedStops = data.stops.filter((stop) =>
+      ["pending", "out_for_delivery"].includes(stop.delivery.status),
+    );
+    if (routedStops.every((stop) => stop.provider === "osrm")) return;
     initialRouteRefreshAttempted.current = true;
     const refreshTimer = window.setTimeout(() => {
       void optimizeCurrentRoute("initial-real-road-route", false);
@@ -167,9 +191,13 @@ export function DriverDashboard({ runId }: { runId: string }) {
     return () => window.clearTimeout(refreshTimer);
   }, [data, optimizeCurrentRoute]);
 
-  async function updateStatus(status: Extract<DeliveryStatus, "delivered">) {
-    const currentStop = data?.stops.find(
-      (stop) => stop.stopOrder === data.run.currentStopOrder,
+  async function updateStatus(
+    status: Extract<DeliveryStatus, "delivered" | "absent">,
+  ) {
+    const currentData = data;
+    if (!currentData) return;
+    const currentStop = currentData.stops.find(
+      (stop) => stop.stopOrder === currentData.run.currentStopOrder,
     );
     if (!currentStop) return;
 
@@ -195,165 +223,57 @@ export function DriverDashboard({ runId }: { runId: string }) {
             : "配達状態を更新できませんでした。",
         );
       }
+      const statusResult = body as {
+        lineNotification?: "sent" | "skipped" | "failed";
+      };
+
+      const locationResponse = await fetch(`/api/runs/${runId}/location`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          latitude: currentStop.delivery.latitude,
+          longitude: currentStop.delivery.longitude,
+        }),
+      });
+      if (!locationResponse.ok) {
+        throw new Error(
+          "配達状態は更新されましたが、ドライバーの現在地を更新できませんでした。",
+        );
+      }
+
+      const hasRemainingStops = currentData.stops.some(
+        (stop) =>
+          stop.delivery.id !== currentStop.delivery.id &&
+          ["pending", "out_for_delivery"].includes(stop.delivery.status),
+      );
 
       setNotice({
         title:
           status === "delivered"
             ? "配達を完了しました。"
             : "ご不在として記録しました。",
-        body: "次の配送先へ進みます。配送順は維持されています。",
+        body:
+          status === "delivered"
+            ? "配送一覧から配達済みへ移動し、次の配送先までのルートを再計算しました。"
+            : statusResult.lineNotification === "sent"
+              ? "受取人のLINEへ再配達日時を選ぶ案内を送信し、残りのルートを再計算しました。"
+              : statusResult.lineNotification === "failed"
+                ? "不在は記録しましたが、LINE案内を送信できませんでした。受取人は受取人画面から日時を指定できます。"
+                : "不在を記録しました。LINE未連携のため、受取人画面から再配達日時を指定できます。",
       });
-      await loadData();
+      setLocationMessage(
+        `現在地を${currentStop.delivery.address}へ更新しました。`,
+      );
+      if (hasRemainingStops) {
+        await optimizeCurrentRoute("status-change-location", false);
+      } else {
+        await loadData();
+      }
     } catch (updateError) {
       setError(
         updateError instanceof Error
           ? updateError.message
           : "更新に失敗しました。",
-      );
-    } finally {
-      setUpdating(false);
-    }
-  }
-
-  async function updateDeliveryMethod(input: {
-    method: DeliveryMethod;
-    dropoffLocation: DropoffLocation | null;
-  }) {
-    const currentStop = data?.stops.find(
-      (stop) => stop.stopOrder === data.run.currentStopOrder,
-    );
-    if (!currentStop) return;
-
-    setUpdating(true);
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/deliveries/${currentStop.delivery.id}/method`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...input,
-            version: currentStop.delivery.version,
-          }),
-        },
-      );
-      const body: unknown = await response.json();
-      if (!response.ok) {
-        throw new Error(
-          typeof body === "object" && body && "message" in body
-            ? String(body.message)
-            : "受取方法を更新できませんでした。",
-        );
-      }
-
-      const detail =
-        input.method === "dropoff"
-          ? input.dropoffLocation
-            ? `置き配場所を「${DROPOFF_LOCATION_LABELS[input.dropoffLocation]}」に設定しました。`
-            : "置き配に変更しました。場所は未指定です。"
-          : "対面受取に変更しました。";
-      setNotice({
-        title: detail,
-        body: "滞在時間と後続の到着予定時刻を更新しました。配送順は維持されています。",
-      });
-      await loadData();
-    } catch (methodError) {
-      setError(
-        methodError instanceof Error
-          ? methodError.message
-          : "受取方法を更新できませんでした。",
-      );
-    } finally {
-      setUpdating(false);
-    }
-  }
-
-  async function updateDeliveryDate() {
-    const nextDate = deliveryDateInput ?? data?.run.deliveryDate;
-    if (!data || !nextDate || nextDate === data.run.deliveryDate) return;
-
-    setRouteUpdating(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/runs/${runId}/date`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deliveryDate: nextDate }),
-      });
-      const body: unknown = await response.json();
-      if (!response.ok) {
-        throw new Error(
-          typeof body === "object" && body && "message" in body
-            ? String(body.message)
-            : "配送日を変更できませんでした。",
-        );
-      }
-
-      setDeliveryDateInput(null);
-      setNotice({
-        title: `配送日を${formatDeliveryDate(nextDate)}へ変更しました。`,
-        body: "会社別の時間枠、残りの配送順、道路経路、ETAを新しい日付で再計算しました。",
-      });
-      await loadData();
-    } catch (dateError) {
-      setError(
-        dateError instanceof Error
-          ? dateError.message
-          : "配送日を変更できませんでした。",
-      );
-    } finally {
-      setRouteUpdating(false);
-    }
-  }
-
-  async function scheduleReattempt(input: {
-    returnInMinutes: number;
-    preferredWindowCode: string | null;
-  }) {
-    const currentStop = data?.stops.find(
-      (stop) => stop.stopOrder === data.run.currentStopOrder,
-    );
-    if (!currentStop) return;
-
-    setUpdating(true);
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/deliveries/${currentStop.delivery.id}/reattempt`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...input,
-            version: currentStop.delivery.version,
-          }),
-        },
-      );
-      const body: unknown = await response.json();
-      if (!response.ok) {
-        throw new Error(
-          typeof body === "object" && body && "message" in body
-            ? String(body.message)
-            : "再配達を設定できませんでした。",
-        );
-      }
-      const result = body as {
-        window: { label: string; movedToNextDay: boolean };
-        optimization: { provider: string; usedFallback: boolean };
-      };
-      setNotice({
-        title: `不在を記録し、${result.window.label}の再配達へ組み込みました。`,
-        body: result.window.movedToNextDay
-          ? "本日の枠に収まらないため、翌日の最初の枠へ再配置しました。"
-          : "在宅予定と道路所要時間を基に、残りの配送順とETAを再計算しました。",
-      });
-      await loadData();
-    } catch (reattemptError) {
-      setError(
-        reattemptError instanceof Error
-          ? reattemptError.message
-          : "再配達を設定できませんでした。",
       );
     } finally {
       setUpdating(false);
@@ -469,6 +389,12 @@ export function DriverDashboard({ runId }: { runId: string }) {
       stop.stopOrder === data.run.currentStopOrder &&
       ["pending", "out_for_delivery"].includes(stop.delivery.status),
   );
+  const demoRouteStops = data.stops
+    .filter((stop) =>
+      ["pending", "out_for_delivery"].includes(stop.delivery.status),
+    )
+    .sort((left, right) => left.stopOrder - right.stopOrder)
+    .slice(0, 6);
 
   return (
     <div className="min-h-screen bg-[#f4f7fb]">
@@ -480,7 +406,7 @@ export function DriverDashboard({ runId }: { runId: string }) {
             </span>
             <div>
               <p className="font-bold leading-tight text-slate-900">
-                スマート配送コンパス
+                スマ配（スマート配送）
               </p>
               <p className="text-[11px] text-slate-400">
                 Driver console · Hiroshima
@@ -502,39 +428,9 @@ export function DriverDashboard({ runId }: { runId: string }) {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge kind="run" value={data.run.status} />
-              <form
-                className="flex flex-wrap items-center gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void updateDeliveryDate();
-                }}
-              >
-                <label className="sr-only" htmlFor="delivery-date">
-                  配送日
-                </label>
-                <input
-                  className="min-h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm"
-                  disabled={routeUpdating || updating}
-                  id="delivery-date"
-                  onInput={(event) =>
-                    setDeliveryDateInput(event.currentTarget.value)
-                  }
-                  type="date"
-                  value={deliveryDateInput ?? data.run.deliveryDate}
-                />
-                <button
-                  className="min-h-9 rounded-xl bg-slate-900 px-3 text-xs font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={
-                    routeUpdating ||
-                    updating ||
-                    !deliveryDateInput ||
-                    deliveryDateInput === data.run.deliveryDate
-                  }
-                  type="submit"
-                >
-                  {routeUpdating ? "再計算中…" : "配送日を変更"}
-                </button>
-              </form>
+              <span className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
+                配送日：{formatDeliveryDate(data.run.deliveryDate)}
+              </span>
             </div>
             <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
               おはようございます、{data.run.driverName}
@@ -571,6 +467,18 @@ export function DriverDashboard({ runId }: { runId: string }) {
         >
           朝8時の自動通知をデモ実行
         </button>
+
+        <details className="mb-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-950">
+          <summary className="cursor-pointer font-bold">
+            デモの見せ方（主役：佐藤 健太さん）
+          </summary>
+          <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-xs leading-5 text-indigo-800">
+            <li>佐藤さんへ「LINEで到着通知」を送る</li>
+            <li>LINEで「10分不在」を押し、田中さんが先になることを示す</li>
+            <li>田中さんの「配達完了」を押し、配達済みへ移ることを示す</li>
+            <li>「ご不在を記録」でLINEへ再配達日時の案内が届くことを示す</li>
+          </ol>
+        </details>
 
         {notice && (
           <div
@@ -621,19 +529,17 @@ export function DriverDashboard({ runId }: { runId: string }) {
           </button>
         ) : null}
 
-        <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
+        <div className="space-y-5">
           <CurrentDeliveryCard
             key={currentStop?.delivery.id ?? "completed"}
             stop={currentStop}
             updating={updating}
-            onMethodChange={(input) => void updateDeliveryMethod(input)}
             onStatusChange={(status) => void updateStatus(status)}
-            onReattempt={(input) => void scheduleReattempt(input)}
           />
           <RouteOverview
             provider={data.run.routeProvider}
             revision={data.run.routeRevision}
-            stops={data.stops}
+            stops={demoRouteStops}
           />
         </div>
 
@@ -644,12 +550,10 @@ export function DriverDashboard({ runId }: { runId: string }) {
                 <span className="flex size-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
                   ◫
                 </span>
-                <h2 className="font-bold text-slate-900">
-                  東広島・実道路ルート
-                </h2>
+                <h2 className="font-bold text-slate-900">経路</h2>
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                青線が現在の配送経路、橙色の番号が再配達地点です
+                全120件から次の6件を地図に表示。短時間不在に応じて道路経路と訪問順を更新
               </p>
             </div>
             <button
@@ -670,7 +574,7 @@ export function DriverDashboard({ runId }: { runId: string }) {
               longitude: data.run.depotLongitude,
             }}
             latestLocation={data.latestLocation}
-            stops={data.stops}
+            stops={demoRouteStops}
           />
         </section>
 

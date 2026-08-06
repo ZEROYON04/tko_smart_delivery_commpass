@@ -11,10 +11,17 @@ import {
   formatServiceTime,
 } from "@/lib/format/delivery";
 import { CARRIER_LABELS, formatWindowLabel } from "@/lib/scheduling/time-slots";
+import { assessWindowFeasibility } from "@/lib/scheduling/window-feasibility";
 import type { RouteStop } from "@/types/delivery";
 
 export function DeliveryCard({ stop }: { stop: RouteStop }) {
   const isDropoff = stop.delivery.deliveryMethod === "dropoff";
+  const windowFeasibility = assessWindowFeasibility({
+    estimatedArrival: stop.estimatedArrival,
+    unavailableUntil: stop.delivery.unavailableUntil,
+    serviceSeconds: stop.delivery.serviceSeconds,
+    windowEnd: stop.delivery.windowEnd,
+  });
   const [notifying, setNotifying] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState<string | null>(
     null,
@@ -57,12 +64,18 @@ export function DeliveryCard({ stop }: { stop: RouteStop }) {
           className={`flex size-10 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
             stop.delivery.status === "delivered"
               ? "bg-emerald-100 text-emerald-700"
-              : isDropoff
-                ? "bg-teal-100 text-teal-800"
-                : "bg-slate-100 text-slate-700"
+              : stop.delivery.status === "absent"
+                ? "bg-amber-100 text-amber-800"
+                : isDropoff
+                  ? "bg-teal-100 text-teal-800"
+                  : "bg-slate-100 text-slate-700"
           }`}
         >
-          {stop.delivery.status === "delivered" ? "✓" : stop.stopOrder}
+          {stop.delivery.status === "delivered"
+            ? "✓"
+            : stop.delivery.status === "absent"
+              ? "不在"
+              : stop.stopOrder}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
@@ -149,15 +162,28 @@ export function DeliveryCard({ stop }: { stop: RouteStop }) {
           )}
 
           {stop.delivery.unavailableUntil && (
-            <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-              受取人から短時間不在の連絡あり（
-              {new Intl.DateTimeFormat("ja-JP", {
-                hour: "2-digit",
-                minute: "2-digit",
-                timeZone: "Asia/Tokyo",
-              }).format(new Date(stop.delivery.unavailableUntil))}
-              まで）
-            </p>
+            <div
+              className={`mt-3 rounded-xl px-3 py-2 text-xs font-semibold ${
+                windowFeasibility.canCompleteWithinWindow
+                  ? "bg-amber-50 text-amber-800"
+                  : "bg-rose-50 text-rose-700"
+              }`}
+            >
+              <p>
+                受取人から短時間不在の連絡あり（
+                {new Intl.DateTimeFormat("ja-JP", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  timeZone: "Asia/Tokyo",
+                }).format(new Date(stop.delivery.unavailableUntil))}
+                まで）
+              </p>
+              <p className="mt-1">
+                {windowFeasibility.canCompleteWithinWindow
+                  ? "同じ配送枠内で順番を変更して再訪予定"
+                  : "現在の配送枠内での再訪が難しいため、LINEで日時変更をご案内済み"}
+              </p>
+            </div>
           )}
 
           {notificationMessage && (
